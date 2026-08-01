@@ -1,6 +1,6 @@
-import { env } from "../../lib/env";
-import { mailTransporter } from "./mailer";
 import type { IMailService } from "./mail.types";
+import { mailTransporter } from "./mailer";
+import { env } from "../../lib/env";
 
 export class OtpMailService implements IMailService {
   async send(to: string, data: { otp: string }): Promise<void> {

@@ -1,6 +1,6 @@
+import type { IMailService, IMailServiceFactory, MailType } from "./mail.types";
 import { OtpMailService } from "./otp-mail.service";
 import { WelcomeMailService } from "./welcome-mail.service";
-import type { IMailService, IMailServiceFactory, MailType } from "./mail.types";
 
 // ADR 004: callers depend only on mailServiceFactory.create(type).send(to, data) and never
 // construct a transporter or pick a template themselves.
