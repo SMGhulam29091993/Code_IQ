@@ -25,3 +25,8 @@
 **Symptom:** User A can fetch User B's reviews by guessing reviewId.
 **Root cause:** `reviewRepo.findById(reviewId)` without scoping to `installationId`.
 **Fix:** Every repo query that returns user data must join through `installationId` and verify ownership. The `installationMiddleware` attaches `req.installation` for this purpose.
+
+## 006 — `authRateLimit` is one shared instance across /register, /verify-otp, /login
+**Symptom:** A client hitting `/auth/register` a few times then `/auth/login` gets 429'd sooner than expected — the 10-request budget looks like it belongs to `/login` alone but is actually exhausted by earlier `/register` calls.
+**Root cause:** `rate-limit.middleware.ts` exports a single `authRateLimit` middleware instance, and `auth.routes.ts` mounts that *same* instance on all three routes. express-rate-limit's default in-memory store keys by IP only (not by route), so all three endpoints share one 10-req/15-min counter per IP.
+**Fix:** This is intentional per `rules/security.md` #8 (rate limiting is IP-based, not per-endpoint), but it matters for integration tests: `__tests__/auth.routes.test.ts` keeps its total request count across register/verify-otp/login well under 10 within a single test file, since they all draw from the same budget. If per-endpoint limits are ever wanted, switch to `rateLimit({ ... })` called separately per route instead of reusing one instance.
