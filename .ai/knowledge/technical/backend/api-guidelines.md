@@ -32,9 +32,17 @@ Response includes:
 ### POST /api/auth/register
 - Auth: none · Rate: 10/IP/15min
 - Body: `{ email, password, name }`
-- 201: `{ token, refreshToken, user: { id, email, name, createdAt } }`
+- 201: `{ identifier, user: { id, email, name, githubId, githubLogin, createdAt } }` — issues an
+  OTP instead of tokens; see ADR 003
 - 400: validation error · 409: email taken
 - → Edge cases: `knowledge/domains/auth.md#register`
+
+### POST /api/auth/verify-otp
+- Auth: none · Rate: 10/IP/15min, plus a 3-attempt lock on the OTP itself
+- Body: `{ identifier, otp }`
+- 200: `{ token, refreshToken, user }`
+- 400: identifier/OTP expired or invalid · 401: wrong OTP · 403: locked after 3rd failed attempt
+- → Edge cases: `knowledge/domains/auth.md#verify-otp`
 
 ### POST /api/auth/login
 - Auth: none · Rate: 10/IP/15min

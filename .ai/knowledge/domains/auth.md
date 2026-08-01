@@ -202,6 +202,12 @@ describe('AuthService.verifyOtp', () => {
 })
 ```
 
+**Implementation note (discovered during Step 2):** the last case above is exercised by
+submitting a wrong OTP on the 3rd attempt (i.e. the attempt that triggers the lock) — since
+locking deletes both the Redis entry and the `otps` row, a *follow-up* call after the lock
+(even with the truly correct code) hits the "identifier not found" branch and gets 400, not
+403. There's no code path where a matching OTP produces a 403.
+
 ---
 
 ### POST /auth/login

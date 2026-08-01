@@ -19,14 +19,17 @@
 - Note: `GET /health` is Step 7 (Deploy), not built here — see that step below.
 - Verified: `pnpm install`, `typecheck`, `build`, and `lint` all pass clean for `@codeiq/api`, `@codeiq/db`, `@codeiq/types`.
 
-## Step 2 — Auth module [ not-started ]
-- [ ] `auth.types.ts`, `auth.validator.ts`
-- [ ] `user.repository.ts` + `refresh-token.repository.ts`
-- [ ] `auth.service.ts` (register, login, refresh, logout)
-- [ ] `auth.controller.ts`
-- [ ] `auth.routes.ts` + mount in `routes/index.ts`
-- [ ] Unit tests: `__tests__/auth.service.test.ts` (all cases from `knowledge/domains/auth.md`)
-- [ ] Integration tests: `__tests__/auth.routes.test.ts`
+## Step 2 — Auth module [ complete ]
+- [x] `auth.types.ts`, `auth.validator.ts`
+- [x] `user.repository.ts` + `refresh-token.repository.ts` + `otp.repository.ts`
+- [x] `services/otp.service.ts` (5-min OTP + Redis identifier, ADR 003) + `services/mail/` factory (ADR 004)
+- [x] `lib/jwt.ts` (access/refresh token signing)
+- [x] `auth.service.ts` (register, verify-otp, login, refresh, logout)
+- [x] `auth.controller.ts`
+- [x] `auth.routes.ts` + mount in `routes/index.ts` + wired through `container.ts`
+- [x] Unit tests: `__tests__/auth.service.test.ts` (29 tests, all cases from `knowledge/domains/auth.md`)
+- [x] Integration tests: `__tests__/auth.routes.test.ts` (12 tests, real Express app via supertest, DB/Redis/mail mocked at module boundary)
+- Verified: `pnpm typecheck`, `pnpm lint`, and `pnpm test` (41/41) all pass clean for `@codeiq/api`.
 - Domain: `knowledge/domains/auth.md` ✓
 
 ## Step 3 — GitHub App module [ not-started ]
