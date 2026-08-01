@@ -1,0 +1,15 @@
+{
+  "name": "@codeiq/config",
+  "version": "0.0.0",
+  "private": true,
+  "main": "eslint-preset.js",
+  "files": [
+    "eslint-preset.js",
+    "tsconfig.base.json"
+  ],
+  "devDependencies": {
+    "eslint": "^9.13.0",
+    "eslint-plugin-import": "^2.31.0",
+    "typescript-eslint": "^8.12.0"
+  }
+}

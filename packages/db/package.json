@@ -1,0 +1,20 @@
+{
+  "name": "@codeiq/db",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "generate": "prisma generate",
+    "migrate": "prisma migrate dev",
+    "studio": "prisma studio"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.20.0"
+  },
+  "devDependencies": {
+    "@codeiq/config": "workspace:*",
+    "@types/node": "^22.9.0",
+    "prisma": "^5.20.0"
+  }
+}
