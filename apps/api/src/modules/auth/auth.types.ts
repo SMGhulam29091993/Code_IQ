@@ -56,6 +56,13 @@ export interface IUserRepository {
   create(data: { email: string; name: string; passwordHash: string }): Promise<User>;
   updateLastLogin(id: string): Promise<void>;
   lockEmail(id: string): Promise<void>;
+  // GitHub identity linking — .ai/knowledge/domains/auth.md#github-oauth-callback. Never a
+  // login bypass; only ever called after a user is already authenticated via JWT.
+  findByGithubId(githubId: string): Promise<User | null>;
+  linkGithubIdentity(
+    userId: string,
+    data: { githubId: string; githubLogin: string; githubAccessToken: string }
+  ): Promise<User>;
 }
 
 export interface IRefreshTokenRepository {

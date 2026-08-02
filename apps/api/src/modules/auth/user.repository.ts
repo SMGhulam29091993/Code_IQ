@@ -21,4 +21,15 @@ export class UserRepository implements IUserRepository {
   async lockEmail(id: string) {
     await prisma.user.update({ where: { id }, data: { status: UserStatus.LOCKED } });
   }
+
+  findByGithubId(githubId: string) {
+    return prisma.user.findUnique({ where: { githubId } });
+  }
+
+  linkGithubIdentity(
+    userId: string,
+    data: { githubId: string; githubLogin: string; githubAccessToken: string }
+  ) {
+    return prisma.user.update({ where: { id: userId }, data });
+  }
 }

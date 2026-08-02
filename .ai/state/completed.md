@@ -1,7 +1,30 @@
 # Completed
 > Append-only. Newest at top.
 
-## 2026-08-02
+## 2026-08-02 (Step 3)
+- Backend Step 3 (GitHub App module) complete: `lib/octokit.ts` (App + installation Octokit
+  factory, pinned to `@octokit/rest@19`/`@octokit/auth-app@6` for CJS compatibility — v20+/v7+
+  are ESM-only), `lib/crypto.ts` (AES-256-GCM encryption for `User.githubAccessToken` at rest),
+  `jobs/queue.ts` (BullMQ `review-queue` producer, pulled forward from Step 5 since the webhook
+  needs to enqueue). `modules/github/`: `github.types.ts`/`github.validator.ts`,
+  `installation.repository.ts`, `repo.repository.ts` (narrow Repo-table lookups),
+  `github-api.client.ts` (Octokit + OAuth token-exchange wrapper), `github.service.ts`
+  (oauth/url, oauth/callback, saveInstallation, listInstallations, deleteInstallation),
+  `installation.middleware.ts` (tenant-isolation gate, reserved for Step 4/5 routes),
+  `github.controller.ts`/`github.routes.ts` mounted at `/github`, `webhook.middleware.ts`
+  (HMAC-SHA256 signature verification), `webhook.service.ts`/`webhook.controller.ts`
+  (pull_request/installation/installation_repositories event routing),
+  `webhook.routes.ts` mounted at `/webhooks`. `IUserRepository` extended with
+  `findByGithubId`/`linkGithubIdentity` for identity linking. Added `validateQuery` middleware
+  (Express 5's `req.query` has no setter, so it mutates in place rather than reassigning —
+  a real bug caught by the route tests). `app.ts` mounts `express.raw()` on `/api/webhooks`
+  ahead of the global `express.json()`. 65 new tests (42 unit + 23 integration via supertest) —
+  `pnpm typecheck`, `pnpm lint`, `pnpm test` (106/106) all pass clean.
+  `knowledge/domains/github-app.md` updated with implementation notes: Octokit CJS pin, the
+  `isOverPlanLimit` FREE-tier review-count implementation, and an open question flagged for
+  Step 4 (no documented mechanism yet creates/syncs `Repo` rows from GitHub).
+
+## 2026-08-02 (Step 2)
 - Backend Step 2 (Auth module) complete: `auth.types.ts`/`auth.validator.ts`, `user.repository.ts`/
   `refresh-token.repository.ts`/`otp.repository.ts`, `services/otp.service.ts` (ADR 003),
   `services/mail/` factory (ADR 004), `lib/jwt.ts`, `auth.service.ts` (register/verify-otp/login/

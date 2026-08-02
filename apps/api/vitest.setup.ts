@@ -14,3 +14,15 @@ process.env.MAIL_PORT = process.env.MAIL_PORT ?? "587";
 process.env.MAIL_USER = process.env.MAIL_USER ?? "test-user";
 process.env.MAIL_PASSWORD = process.env.MAIL_PASSWORD ?? "test-password";
 process.env.MAIL_FROM = process.env.MAIL_FROM ?? "CodeIQ Test <test@codeiq.dev>";
+process.env.FRONTEND_URL = process.env.FRONTEND_URL ?? "http://localhost:3000";
+process.env.GITHUB_APP_ID = process.env.GITHUB_APP_ID ?? "123456";
+// A minimal valid base64 PEM-shaped string — no code path in tests actually decodes and
+// uses this key against a real GitHub API call (Octokit calls are always mocked).
+process.env.GITHUB_APP_PRIVATE_KEY = process.env.GITHUB_APP_PRIVATE_KEY ?? "dGVzdC1wcml2YXRlLWtleQ==";
+process.env.GITHUB_WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET ?? "test-webhook-secret";
+process.env.GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID ?? "test-client-id";
+process.env.GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET ?? "test-client-secret";
+process.env.GITHUB_OAUTH_REDIRECT_URI =
+  process.env.GITHUB_OAUTH_REDIRECT_URI ?? "http://localhost:4000/api/github/oauth/callback";
+process.env.ENCRYPTION_KEY =
+  process.env.ENCRYPTION_KEY ?? "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".slice(0, 64);

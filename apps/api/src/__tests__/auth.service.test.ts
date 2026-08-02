@@ -75,6 +75,8 @@ describe("AuthService", () => {
       create: vi.fn(),
       updateLastLogin: vi.fn(),
       lockEmail: vi.fn(),
+      findByGithubId: vi.fn(),
+      linkGithubIdentity: vi.fn(),
     };
     refreshTokenRepo = {
       create: vi.fn(),

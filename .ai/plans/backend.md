@@ -32,19 +32,33 @@
 - Verified: `pnpm typecheck`, `pnpm lint`, and `pnpm test` (41/41) all pass clean for `@codeiq/api`.
 - Domain: `knowledge/domains/auth.md` ✓
 
-## Step 3 — GitHub App module [ not-started ]
-- [ ] `src/lib/octokit.ts`: App + installation Octokit factory
-- [ ] `github.types.ts`, `github.validator.ts`
-- [ ] `installation.repository.ts`
-- [ ] `github.service.ts` (OAuth URL, callback, saveInstallation, list, delete)
-- [ ] `installation.middleware.ts`: attach req.installation
-- [ ] `github.controller.ts`
-- [ ] `github.routes.ts`
-- [ ] `webhook.middleware.ts`: HMAC-SHA256 signature verification
-- [ ] `webhook.controller.ts`: event routing + job enqueue
-- [ ] `webhook.routes.ts` (raw body parser, no JWT)
-- [ ] Unit + integration tests (all cases from `knowledge/domains/github-app.md`)
-- Domain: `knowledge/domains/github-app.md` ✓
+## Step 3 — GitHub App module [ complete ]
+- [x] `src/lib/octokit.ts`: App + installation Octokit factory (pinned to CJS-compatible
+  `@octokit/rest@19` / `@octokit/auth-app@6` — see github-app.md implementation notes)
+- [x] `src/lib/crypto.ts`: AES-256-GCM encryption for `User.githubAccessToken` at rest
+- [x] `src/jobs/queue.ts`: BullMQ `review-queue` producer (pulled forward from Step 5 — the
+  webhook needs to enqueue; the worker/processor still lands in Step 5)
+- [x] `github.types.ts`, `github.validator.ts`
+- [x] `installation.repository.ts`, `repo.repository.ts` (narrow Repo-table lookups the
+  webhook needs — see github-app.md notes), `github-api.client.ts` (Octokit + OAuth wrapper)
+- [x] `IUserRepository` extended with `findByGithubId`/`linkGithubIdentity` (auth module)
+- [x] `github.service.ts` (OAuth URL, callback, saveInstallation, list, delete)
+- [x] `installation.middleware.ts`: attach req.installation (reserved for Step 4/5 routes —
+  see github-app.md notes for why Step 3's own DELETE route doesn't mount it)
+- [x] `github.controller.ts`
+- [x] `github.routes.ts` + mounted at `/github` in `routes/index.ts`
+- [x] `webhook.middleware.ts`: HMAC-SHA256 signature verification
+- [x] `webhook.service.ts` + `webhook.controller.ts`: event routing + job enqueue
+- [x] `webhook.routes.ts` (mounted at `/webhooks`; raw body parser mounted in `app.ts` on the
+  `/api/webhooks` prefix ahead of the global `express.json()`)
+- [x] `validateQuery` middleware added (query-string counterpart to `validate`)
+- [x] Unit tests: `github.service.test.ts` (18), `webhook.service.test.ts` (16),
+  `installation.middleware.test.ts` (4), `webhook.middleware.test.ts` (4)
+- [x] Integration tests: `github.routes.test.ts` (14), `webhook.routes.test.ts` (9)
+- Verified: `pnpm typecheck`, `pnpm lint`, and `pnpm test` (106/106) all pass clean for
+  `@codeiq/api`.
+- Domain: `knowledge/domains/github-app.md` ✓ (updated with implementation notes/open
+  questions discovered during this step)
 
 ## Step 4 — Repos module [ not-started ]
 - [ ] `repo.repository.ts`, `repo-config.repository.ts`

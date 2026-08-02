@@ -2,8 +2,8 @@ import "dotenv/config";
 import { z } from "zod";
 
 // Fail fast: the process refuses to boot if any of these are missing or malformed.
-// GitHub App / Stripe / Gemini vars are added here in their own plan step
-// (.ai/plans/backend.md Step 3, Step 5, Step 6) once code actually consumes them.
+// Stripe / Gemini vars are added here in their own plan step
+// (.ai/plans/backend.md Step 5, Step 6) once code actually consumes them.
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(4000),
@@ -19,6 +19,24 @@ const envSchema = z.object({
   MAIL_USER: z.string().min(1),
   MAIL_PASSWORD: z.string().min(1),
   MAIL_FROM: z.string().min(1),
+
+  FRONTEND_URL: z.string().url(),
+
+  // GitHub App — installation-token auth for repo/PR access (ADR 001).
+  GITHUB_APP_ID: z.string().min(1),
+  // Base64-encoded PEM, decoded at runtime — see .ai/rules/security.md #4 and pitfall 002.
+  GITHUB_APP_PRIVATE_KEY: z.string().min(1),
+  GITHUB_WEBHOOK_SECRET: z.string().min(1),
+
+  // GitHub App user-to-server OAuth — identity linking only (.ai/knowledge/domains/auth.md
+  // #github-oauth-url), never a login bypass (.ai/rules/backend.md "Auth boundary").
+  GITHUB_CLIENT_ID: z.string().min(1),
+  GITHUB_CLIENT_SECRET: z.string().min(1),
+  GITHUB_OAUTH_REDIRECT_URI: z.string().url(),
+
+  // 32-byte key (hex-encoded, 64 chars) for AES-256-GCM encryption of githubAccessToken at
+  // rest — see .ai/rules/security.md security-hardening-backlog "GitHub token encryption".
+  ENCRYPTION_KEY: z.string().length(64, "ENCRYPTION_KEY must be a 64-char hex string (32 bytes)"),
 }).refine((e) => e.JWT_SECRET !== e.JWT_REFRESH_SECRET, {
   message: "JWT_SECRET and JWT_REFRESH_SECRET must be different values (.ai/rules/security.md #5)",
   path: ["JWT_REFRESH_SECRET"],

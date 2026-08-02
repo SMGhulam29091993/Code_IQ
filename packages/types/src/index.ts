@@ -21,3 +21,14 @@ export interface AuthTokens {
   token: string;
   refreshToken: string;
 }
+
+// GitHub App installation summary — matches
+// apps/api/src/modules/github/github.types.ts SanitizedInstallation.
+export interface Installation {
+  id: string;
+  githubInstallationId: number;
+  accountLogin: string;
+  accountType: string;
+  planTier: string;
+  repoCount: number;
+}

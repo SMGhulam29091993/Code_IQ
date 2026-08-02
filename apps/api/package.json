@@ -13,6 +13,8 @@
   "dependencies": {
     "@codeiq/db": "workspace:*",
     "@codeiq/types": "workspace:*",
+    "@octokit/auth-app": "^6.1.4",
+    "@octokit/rest": "^19.0.13",
     "bcrypt": "^5.1.1",
     "bullmq": "^5.21.0",
     "cors": "^2.8.5",

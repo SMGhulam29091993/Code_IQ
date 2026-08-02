@@ -268,3 +268,42 @@ export const getInstallationOctokit = async (githubInstallationId: number) => {
 | Installation token expired (1hr) | Octokit handles refresh automatically via `createAppAuth` |
 | Private key malformed (bad base64) | Startup check in `server.ts` — fail fast |
 | Rate limit hit (5000 req/hr) | Retry with exponential backoff in `review.job.ts` |
+
+---
+
+## Implementation notes (discovered during Step 3)
+
+- **Octokit version pinned to v19 / auth-app v6.** `@octokit/rest@20+` and `@octokit/auth-app@7+`
+  are pure ESM and this repo builds CommonJS (Node16 module resolution, no `"type": "module"`).
+  Importing them threw `TS1479` at typecheck. Pinned to the last CJS-compatible majors
+  (`@octokit/rest@^19.0.13`, `@octokit/auth-app@^6.1.4`) instead of converting the whole API to
+  ESM. Revisit if a future step needs an ESM-only Octokit feature.
+- **`reviewQueue` (BullMQ producer) built now, not in Step 5.** The webhook pseudocode above
+  enqueues into `review-queue` synchronously, so `src/jobs/queue.ts` (Queue producer only, no
+  worker) shipped as part of Step 3 instead of waiting for Step 5. Step 5 adds `worker.ts` +
+  `review.job.ts` alongside it; nothing here changes when that lands.
+- **`isOverPlanLimit` (webhook pull_request handling)** — not detailed in the pseudocode above.
+  Implemented as: non-FREE tiers always pass; FREE tier counts `Review` rows created since the
+  start of the current calendar month across all repos under the installation, capped at the
+  50 reviews/mo limit from `knowledge/domains/billing.md`. The `Review` table already exists in
+  `packages/db/prisma/schema.prisma` even though the review pipeline itself (Step 5) hasn't
+  shipped, so this counts real rows rather than a placeholder.
+- **No `installation_repositories.added` handler.** Only `.removed` is specified above. There is
+  currently no documented mechanism for `Repo` rows to be created/synced from GitHub's repo list
+  at all — not on `POST /github/install`, not on `installation_repositories.added`. `Repo` rows
+  simply don't exist until something (a future Step 4 sync flow, most likely) creates them, so
+  `pull_request` webhooks for genuinely new repos resolve to "Repo not active" today. Flagging
+  this gap for whoever picks up Step 4 rather than inventing a sync mechanism here.
+- **`installation.middleware.ts` exists but isn't mounted on this module's own routes.**
+  `DELETE /github/installations/:installationId`'s ownership check (404 unknown / 403 wrong
+  owner) is done inline in `GithubService.deleteInstallation`, matching the unit tests listed
+  above exactly. The middleware is generic tenant-isolation infrastructure for Step 4 (Repos) and
+  Step 5 (Reviews), which scope every query by `installationId` — see `memory/pitfalls.md` #005.
+- **GitHub token encryption at rest** (security backlog item) implemented in `lib/crypto.ts`:
+  AES-256-GCM, keyed by a new `ENCRYPTION_KEY` env var (32-byte, hex-encoded). Applied to
+  `User.githubAccessToken` before it's ever written to the DB in the OAuth callback flow.
+- **User-to-server OAuth is a second, separate GitHub App credential pair.** `GITHUB_CLIENT_ID` /
+  `GITHUB_CLIENT_SECRET` (for `GET /github/oauth/url` and `/oauth/callback`, identity linking —
+  spec lives in `knowledge/domains/auth.md`) are distinct from `GITHUB_APP_ID` /
+  `GITHUB_APP_PRIVATE_KEY` (installation-token auth for repo/PR access, this file). Both pairs
+  belong to the same GitHub App registration but are never interchangeable.
