@@ -14,6 +14,10 @@ import { InstallationRepository } from "./modules/github/installation.repository
 import { RepoLookupRepository } from "./modules/github/repo.repository";
 import { WebhookController } from "./modules/github/webhook.controller";
 import { WebhookService } from "./modules/github/webhook.service";
+import { RepoConfigRepository } from "./modules/repos/repo-config.repository";
+import { RepoController } from "./modules/repos/repo.controller";
+import { RepoRepository } from "./modules/repos/repo.repository";
+import { RepoService } from "./modules/repos/repo.service";
 import { MailServiceFactory } from "./services/mail/mail-service.factory";
 import { OtpService } from "./services/otp.service";
 
@@ -47,3 +51,9 @@ const webhookService = new WebhookService(installationRepository, repoLookupRepo
 
 export const githubController = new GithubController(githubService);
 export const webhookController = new WebhookController(webhookService);
+
+const repoRepository = new RepoRepository();
+const repoConfigRepository = new RepoConfigRepository();
+const repoService = new RepoService(repoRepository, repoConfigRepository, installationRepository);
+
+export const repoController = new RepoController(repoService);

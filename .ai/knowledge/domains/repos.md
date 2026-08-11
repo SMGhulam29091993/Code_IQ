@@ -217,3 +217,35 @@ describe('ConfigService.getEffectiveConfig', () => {
   it('returns default config when no DB config and no .codeiq.yml')
 })
 ```
+
+---
+
+## Implementation notes (discovered during Step 4)
+
+- **`config.service.ts` isn't wired into any Step 4 route.** `GET`/`PATCH /repos/:repoId/config`
+  read and write the raw `RepoConfig` DB row only (matching their documented acceptance
+  criteria — no `.codeiq.yml` merge). `ConfigService.getEffectiveConfig` takes an installation
+  `Octokit` + `owner`/`repo`, which only exist once a review is actually running — it's built
+  now and unit-tested, but its first real caller is the review pipeline
+  (`.ai/plans/backend.md` Step 5).
+- **Default config: schema.prisma's column `@default` on `ignorePatterns` doesn't match this
+  doc's default.** The Prisma column default is `["*.test.ts", "*.spec.ts", "dist/**"]` (missing
+  `"node_modules/**"`). `repo-config.repository.ts`'s `createDefault`/`upsertPartial` never rely
+  on that column default — every field is passed explicitly from `DEFAULT_REPO_CONFIG` in
+  `repo.types.ts`, which does match this doc — so the drift is currently harmless but worth
+  fixing in schema.prisma directly (a migration) before anything else ever inserts a
+  `RepoConfig` row without going through this repository.
+- **FREE tier repo limit is 3, enforced in `RepoService.activateRepo`.** Mirrors the FREE-tier
+  review-count limit pattern from `github-app.md`'s `isOverPlanLimit` (Step 3): counts active
+  `Repo` rows under the installation via `IRepoRepository.countActiveForInstallation`, only for
+  `planTier === 'FREE'`, skipped entirely when the repo is already active (idempotent
+  activation never re-triggers the limit check).
+- **`GET /repos?installationId=` distinguishes 404 from 403.** Unknown `installationId` → 404
+  `"Installation not found"`; known but owned by another user → 403 `"Forbidden"`. The
+  documented edge case only mentions the 403 case; the 404 split follows the same convention
+  already used by `installation.middleware.ts` (`.ai/knowledge/domains/github-app.md`).
+- **`GET /repos/:repoId/stats` currently always returns zeros.** The route, auth, and
+  ownership check are real; the actual `Review`/`ReviewIssue` aggregation queries are left for
+  whoever wires up the review pipeline in Step 5, once there's real data to aggregate. No
+  edge cases were documented for this endpoint in the spec above, so this is a placeholder
+  return, not a bug.

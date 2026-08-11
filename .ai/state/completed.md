@@ -1,6 +1,28 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-08-11 (Step 4)
+- Backend Step 4 (Repos module) complete, in two parts:
+  1. **Repo sync from GitHub** (resolves the open question flagged at the end of Step 3 — no
+     mechanism previously created `Repo` rows, so `pull_request` webhooks for genuinely new
+     repos always resolved to "Repo not active"). Added `IGithubApiClient.listInstallationRepos`
+     (Octokit `apps.listReposAccessibleToInstallation`, single page) and
+     `IRepoLookupRepository.upsertFromGithub`; wired into `GithubService.saveInstallation`
+     (best-effort, non-blocking) and `WebhookService.handle`'s new
+     `installation_repositories.added` branch (mirrors the existing `.removed` handler).
+  2. **`modules/repos/`**: `repo.repository.ts` + `repo-config.repository.ts`,
+     `config.service.ts` (`.codeiq.yml` effective-config merge — built and unit-tested, not
+     yet called from a route; first real caller is Step 5), `repo.service.ts` (list/
+     activate/deactivate/config CRUD/stats — FREE tier 3-repo limit enforced on activate,
+     stats returns real-but-zero aggregates pending Step 5's Review data), `repo.controller.ts`/
+     `repo.routes.ts` mounted at `/repos`, wired through `container.ts`.
+  91 new tests (55 unit + 36 integration, including repo-sync coverage added to the Step 3
+  github/webhook test files) — `pnpm typecheck`, `pnpm lint`, `pnpm test` (162/162) all pass
+  clean. Added `js-yaml` dependency for `.codeiq.yml` parsing (hit and fixed a CJS/ESM default-
+  export pitfall — see `memory/pitfalls.md` #009). `knowledge/domains/github-app.md` (repo-sync
+  resolved) and `knowledge/domains/repos.md` (implementation notes, including a documented
+  schema.prisma default-value drift — `memory/pitfalls.md` #010) updated.
+
 ## 2026-08-02 (Step 3)
 - Backend Step 3 (GitHub App module) complete: `lib/octokit.ts` (App + installation Octokit
   factory, pinned to `@octokit/rest@19`/`@octokit/auth-app@6` for CJS compatibility — v20+/v7+

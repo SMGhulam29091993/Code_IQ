@@ -60,13 +60,24 @@
 - Domain: `knowledge/domains/github-app.md` ✓ (updated with implementation notes/open
   questions discovered during this step)
 
-## Step 4 — Repos module [ not-started ]
-- [ ] `repo.repository.ts`, `repo-config.repository.ts`
-- [ ] `config.service.ts` (effective config resolution)
-- [ ] `repo.service.ts` (list, activate, deactivate, config CRUD, stats)
-- [ ] `repo.controller.ts`, `repo.routes.ts`
-- [ ] Unit + integration tests (all cases from `knowledge/domains/repos.md`)
-- Domain: `knowledge/domains/repos.md` ✓
+## Step 4 — Repos module [ complete ]
+- [x] Repo sync from GitHub (resolves the Step 3 open question): `IGithubApiClient.listInstallationRepos`
+  + `IRepoLookupRepository.upsertFromGithub`, called from `GithubService.saveInstallation`
+  (best-effort, on `POST /github/install`) and `WebhookService.handle` (`installation_repositories.added`)
+- [x] `modules/repos/repo.repository.ts`, `repo-config.repository.ts`
+- [x] `modules/repos/config.service.ts` (effective config resolution — `.codeiq.yml` merge;
+  built and unit-tested, not yet called from any route — first real caller is Step 5)
+- [x] `modules/repos/repo.service.ts` (list, activate, deactivate, config CRUD, stats — stats
+  returns real-but-always-zero aggregates until Step 5 ships Review data)
+- [x] `modules/repos/repo.controller.ts`, `repo.routes.ts` + mounted at `/repos` in `routes/index.ts`
+  + wired through `container.ts`
+- [x] Unit tests: `repo.service.test.ts` (24), `config.service.test.ts` (7), plus repo-sync
+  coverage added to `github.service.test.ts`/`webhook.service.test.ts`
+- [x] Integration tests: `repo.routes.test.ts` (19), plus repo-sync coverage added to
+  `github.routes.test.ts`/`webhook.routes.test.ts`
+- Verified: `pnpm typecheck`, `pnpm lint`, and `pnpm test` (162/162) all pass clean for `@codeiq/api`.
+- Domain: `knowledge/domains/repos.md` ✓ (Implementation notes section added) and
+  `knowledge/domains/github-app.md` ✓ (repo-sync open question resolved)
 
 ## Step 5 — Review pipeline [ not-started ]
 - [ ] `src/jobs/queue.ts`: BullMQ review-queue init
