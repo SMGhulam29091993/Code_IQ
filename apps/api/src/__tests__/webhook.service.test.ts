@@ -85,6 +85,7 @@ describe("WebhookService", () => {
       deactivateByGithubId: vi.fn(),
       deactivateAllForInstallation: vi.fn(),
       countReviewsThisMonth: vi.fn(),
+      upsertFromGithub: vi.fn(),
     };
 
     service = new WebhookService(installationRepo, repoRepo);
@@ -323,6 +324,56 @@ describe("WebhookService", () => {
       expect(repoRepo.deactivateByGithubId).toHaveBeenCalledWith(1);
       expect(repoRepo.deactivateByGithubId).toHaveBeenCalledWith(2);
       expect(message).toBe("Repos deactivated");
+    });
+  });
+
+  describe("installation_repositories.added", () => {
+    it("creates Repo rows for added repos when the installation is known", async () => {
+      vi.mocked(installationRepo.findByGithubId).mockResolvedValue(buildInstallation());
+
+      const message = await service.handle({
+        event: "installation_repositories",
+        deliveryId: "d",
+        body: {
+          action: "added",
+          installation: { id: 111 },
+          repositories_added: [
+            { id: 1, full_name: "acme/one" },
+            { id: 2, full_name: "acme/two" },
+          ],
+        },
+      });
+
+      expect(repoRepo.upsertFromGithub).toHaveBeenCalledWith({
+        githubRepoId: 1,
+        fullName: "acme/one",
+        language: null,
+        installationId: "install-1",
+      });
+      expect(repoRepo.upsertFromGithub).toHaveBeenCalledWith({
+        githubRepoId: 2,
+        fullName: "acme/two",
+        language: null,
+        installationId: "install-1",
+      });
+      expect(message).toBe("Repos synced");
+    });
+
+    it("no-ops when the installation is unknown", async () => {
+      vi.mocked(installationRepo.findByGithubId).mockResolvedValue(null);
+
+      const message = await service.handle({
+        event: "installation_repositories",
+        deliveryId: "d",
+        body: {
+          action: "added",
+          installation: { id: 999 },
+          repositories_added: [{ id: 1, full_name: "acme/one" }],
+        },
+      });
+
+      expect(repoRepo.upsertFromGithub).not.toHaveBeenCalled();
+      expect(message).toBe("Installation unknown");
     });
   });
 

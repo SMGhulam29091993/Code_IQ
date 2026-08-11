@@ -80,6 +80,7 @@ describe("GithubService", () => {
       deactivateByGithubId: vi.fn(),
       deactivateAllForInstallation: vi.fn(),
       countReviewsThisMonth: vi.fn(),
+      upsertFromGithub: vi.fn(),
     };
     userRepo = {
       findByEmail: vi.fn(),
@@ -94,7 +95,9 @@ describe("GithubService", () => {
       getInstallation: vi.fn(),
       exchangeOAuthCode: vi.fn(),
       getAuthenticatedUser: vi.fn(),
+      listInstallationRepos: vi.fn(),
     };
+    vi.mocked(githubApiClient.listInstallationRepos).mockResolvedValue([]);
 
     service = new GithubService(installationRepo, repoRepo, userRepo, githubApiClient);
   });
@@ -269,6 +272,52 @@ describe("GithubService", () => {
       expect(installationRepo.upsert).toHaveBeenCalledWith(
         expect.objectContaining({ userId: "user-1" })
       );
+    });
+
+    it("syncs repos from GitHub and returns the synced count", async () => {
+      vi.mocked(githubApiClient.getInstallation).mockResolvedValue({
+        accountLogin: "acme",
+        accountType: "Organization",
+      });
+      vi.mocked(installationRepo.findByGithubId).mockResolvedValue(null);
+      vi.mocked(installationRepo.upsert).mockResolvedValue(buildInstallation());
+      vi.mocked(githubApiClient.listInstallationRepos).mockResolvedValue([
+        { githubRepoId: 1, fullName: "acme/one", language: "TypeScript" },
+        { githubRepoId: 2, fullName: "acme/two", language: null },
+      ]);
+
+      const result = await service.saveInstallation("user-1", { installationId: 123 });
+
+      expect(githubApiClient.listInstallationRepos).toHaveBeenCalledWith(123);
+      expect(repoRepo.upsertFromGithub).toHaveBeenCalledWith({
+        githubRepoId: 1,
+        fullName: "acme/one",
+        language: "TypeScript",
+        installationId: "install-1",
+      });
+      expect(repoRepo.upsertFromGithub).toHaveBeenCalledWith({
+        githubRepoId: 2,
+        fullName: "acme/two",
+        language: null,
+        installationId: "install-1",
+      });
+      expect(result.installation.repoCount).toBe(2);
+    });
+
+    it("does not fail the install when repo sync throws (best-effort)", async () => {
+      vi.mocked(githubApiClient.getInstallation).mockResolvedValue({
+        accountLogin: "acme",
+        accountType: "Organization",
+      });
+      vi.mocked(installationRepo.findByGithubId).mockResolvedValue(null);
+      vi.mocked(installationRepo.upsert).mockResolvedValue(buildInstallation());
+      vi.mocked(githubApiClient.listInstallationRepos).mockRejectedValue(
+        new AppError("GitHub API unavailable", 502)
+      );
+
+      const result = await service.saveInstallation("user-1", { installationId: 123 });
+
+      expect(result.installation.repoCount).toBe(0);
     });
   });
 

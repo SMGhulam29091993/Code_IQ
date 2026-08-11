@@ -22,4 +22,22 @@ export class RepoLookupRepository implements IRepoLookupRepository {
       where: { repo: { installationId }, createdAt: { gte: startOfMonth } },
     });
   }
+
+  async upsertFromGithub(data: {
+    githubRepoId: number;
+    fullName: string;
+    language: string | null;
+    installationId: string;
+  }) {
+    await prisma.repo.upsert({
+      where: { githubRepoId: data.githubRepoId },
+      create: {
+        githubRepoId: data.githubRepoId,
+        fullName: data.fullName,
+        language: data.language,
+        installationId: data.installationId,
+      },
+      update: { fullName: data.fullName, language: data.language },
+    });
+  }
 }

@@ -9,7 +9,7 @@ import { env } from "../lib/env";
 vi.mock("@codeiq/db", () => ({
   prisma: {
     installation: { findUnique: vi.fn(), updateMany: vi.fn() },
-    repo: { findUnique: vi.fn(), updateMany: vi.fn() },
+    repo: { findUnique: vi.fn(), updateMany: vi.fn(), upsert: vi.fn() },
     review: { count: vi.fn() },
   },
 }));
@@ -88,7 +88,11 @@ function sign(payload: string) {
 function mockPrisma() {
   return prisma as unknown as {
     installation: { findUnique: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
-    repo: { findUnique: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
+    repo: {
+      findUnique: ReturnType<typeof vi.fn>;
+      updateMany: ReturnType<typeof vi.fn>;
+      upsert: ReturnType<typeof vi.fn>;
+    };
     review: { count: ReturnType<typeof vi.fn> };
   };
 }
@@ -181,6 +185,23 @@ describe("Webhook routes", () => {
 
     expect(res.status).toBe(200);
     expect(mockPrisma().repo.updateMany).toHaveBeenCalledTimes(2);
+  });
+
+  it("creates repos on installation_repositories.added when the installation is known", async () => {
+    mockPrisma().installation.findUnique.mockResolvedValueOnce(buildInstallation());
+
+    const res = await postWebhook(
+      {
+        action: "added",
+        installation: { id: 111 },
+        repositories_added: [{ id: 1, full_name: "acme/one" }],
+      },
+      { event: "installation_repositories" }
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.message).toBe("Repos synced");
+    expect(mockPrisma().repo.upsert).toHaveBeenCalledTimes(1);
   });
 
   it("returns 200 for unhandled event types", async () => {

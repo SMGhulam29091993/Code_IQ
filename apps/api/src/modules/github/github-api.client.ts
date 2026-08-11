@@ -1,13 +1,14 @@
 import { Octokit } from "@octokit/rest";
 import type {
   GithubInstallationMeta,
+  GithubRepoListItem,
   GithubUserProfile,
   IGithubApiClient,
   OAuthTokenExchangeResult,
 } from "./github.types";
 import { env } from "../../lib/env";
 import { AppError, NotFoundError } from "../../lib/errors";
-import { appOctokit } from "../../lib/octokit";
+import { appOctokit, getInstallationOctokit } from "../../lib/octokit";
 
 const GITHUB_OAUTH_TOKEN_URL = "https://github.com/login/oauth/access_token";
 
@@ -66,6 +67,24 @@ export class GithubApiClient implements IGithubApiClient {
       return { id: data.id, login: data.login };
     } catch {
       throw new AppError("GitHub authentication failed", 502);
+    }
+  }
+
+  // Single page, 100 repos — see github-app.md "Repo sync" for why pagination isn't handled
+  // yet (no installation in this codebase's test data has ever needed a second page).
+  async listInstallationRepos(githubInstallationId: number): Promise<GithubRepoListItem[]> {
+    try {
+      const octokit = getInstallationOctokit(githubInstallationId);
+      const { data } = await octokit.rest.apps.listReposAccessibleToInstallation({
+        per_page: 100,
+      });
+      return data.repositories.map((repo) => ({
+        githubRepoId: repo.id,
+        fullName: repo.full_name,
+        language: repo.language ?? null,
+      }));
+    } catch {
+      throw new AppError("GitHub API unavailable", 502);
     }
   }
 }

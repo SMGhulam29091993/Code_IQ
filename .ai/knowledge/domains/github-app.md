@@ -288,12 +288,27 @@ export const getInstallationOctokit = async (githubInstallationId: number) => {
   50 reviews/mo limit from `knowledge/domains/billing.md`. The `Review` table already exists in
   `packages/db/prisma/schema.prisma` even though the review pipeline itself (Step 5) hasn't
   shipped, so this counts real rows rather than a placeholder.
-- **No `installation_repositories.added` handler.** Only `.removed` is specified above. There is
-  currently no documented mechanism for `Repo` rows to be created/synced from GitHub's repo list
-  at all — not on `POST /github/install`, not on `installation_repositories.added`. `Repo` rows
-  simply don't exist until something (a future Step 4 sync flow, most likely) creates them, so
-  `pull_request` webhooks for genuinely new repos resolve to "Repo not active" today. Flagging
-  this gap for whoever picks up Step 4 rather than inventing a sync mechanism here.
+- **Repo sync (resolved in Step 4).** `Repo` rows are created/kept in sync from GitHub at two
+  points, both funneling through `IRepoLookupRepository.upsertFromGithub` (upsert keyed on
+  `githubRepoId`, never moves a repo to a different `installationId` on conflict):
+  1. **`POST /github/install`** (`github.service.ts`) — right after the `Installation` upsert,
+     `GithubService.syncRepos` calls the new `IGithubApiClient.listInstallationRepos` (Octokit
+     `apps.listReposAccessibleToInstallation`, single page of up to 100 repos — no pagination
+     loop yet, revisit if an installation with 100+ repos shows up) and upserts a `Repo` row per
+     result, `isActive` defaulting to `false` per the Prisma schema. This is **best-effort**: a
+     GitHub API failure here is caught and swallowed (returns a synced count of 0) rather than
+     failing the install response, since the `Installation` row is already durably saved by that
+     point.
+  2. **`installation_repositories.added` webhook** (`webhook.service.ts`) — mirrors the existing
+     `.removed` handler, for repos added to an installation later without a full reinstall. Looks
+     up the local `Installation` by `githubInstallationId` first (webhook payloads only carry the
+     GitHub ID); if unknown (e.g. the webhook races ahead of `/install` completing), no-ops and
+     returns `"Installation unknown"` — the eventual `/install` call's own sync picks the repo up.
+     Webhook payloads for this event don't include `language`, so it's stored as `null` here (the
+     next `/install`-time sync, or a future repo-details refresh, backfills it).
+
+  `pull_request` webhooks for a repo neither of these has ever seen still resolve to
+  `"Repo not active"` (repo row genuinely doesn't exist) — this is expected, not a gap.
 - **`installation.middleware.ts` exists but isn't mounted on this module's own routes.**
   `DELETE /github/installations/:installationId`'s ownership check (404 unknown / 403 wrong
   owner) is done inline in `GithubService.deleteInstallation`, matching the unit tests listed

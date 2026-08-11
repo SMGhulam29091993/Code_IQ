@@ -56,14 +56,25 @@ export interface IInstallationRepository {
 
 // Narrow, Repo-table-only accessor scoped to what the Step 3 webhook + installation-delete
 // flows need (.ai/knowledge/domains/github-app.md). The full CRUD-facing repo management
-// module (list/activate/deactivate/config) is `.ai/plans/backend.md` Step 4 — this file may
-// be extended or folded into that module's repo.repository.ts then.
+// module (list/activate/deactivate/config) is `.ai/plans/backend.md` Step 4's own
+// modules/repos/repo.repository.ts — this one stays narrow and keeps serving the github
+// module's own routes/webhook.
 export interface IRepoLookupRepository {
   findByGithubId(githubRepoId: number): Promise<RepoWithConfig | null>;
   deactivateByGithubId(githubRepoId: number): Promise<void>;
   deactivateAllForInstallation(installationId: string): Promise<void>;
   // Calendar-month count, for the FREE tier "50 reviews/mo" limit (.ai/knowledge/domains/billing.md).
   countReviewsThisMonth(installationId: string): Promise<number>;
+  // Upsert keyed on githubRepoId — same repo synced twice (re-install, or install followed by
+  // an installation_repositories.added webhook for the same repo) must stay idempotent.
+  // Does not update installationId on conflict, matching IInstallationRepository.upsert's
+  // stance on not silently transferring ownership. See github-app.md "Repo sync".
+  upsertFromGithub(data: {
+    githubRepoId: number;
+    fullName: string;
+    language: string | null;
+    installationId: string;
+  }): Promise<void>;
 }
 
 export interface GithubInstallationMeta {
@@ -80,6 +91,12 @@ export interface GithubUserProfile {
   login: string;
 }
 
+export interface GithubRepoListItem {
+  githubRepoId: number;
+  fullName: string;
+  language: string | null;
+}
+
 // Thin wrapper around Octokit + the GitHub OAuth endpoints — injected into GithubService so
 // unit tests mock this instead of hitting the network (same pattern as IMailServiceFactory
 // in the auth module).
@@ -87,6 +104,9 @@ export interface IGithubApiClient {
   getInstallation(githubInstallationId: number): Promise<GithubInstallationMeta>;
   exchangeOAuthCode(code: string): Promise<OAuthTokenExchangeResult>;
   getAuthenticatedUser(accessToken: string): Promise<GithubUserProfile>;
+  // First 100 repos accessible to the installation (single page) — see github-app.md
+  // "Repo sync" for the pagination caveat.
+  listInstallationRepos(githubInstallationId: number): Promise<GithubRepoListItem[]>;
 }
 
 export interface IGithubService {
@@ -111,6 +131,7 @@ export interface GithubWebhookBody {
     head: { sha: string };
   };
   repositories_removed?: Array<{ id: number }>;
+  repositories_added?: Array<{ id: number; full_name: string }>;
 }
 
 export interface WebhookEventInput {

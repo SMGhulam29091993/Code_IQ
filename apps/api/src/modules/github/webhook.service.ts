@@ -35,6 +35,24 @@ export class WebhookService implements IWebhookService {
       }
       return "Repos deactivated";
     }
+    if (event === "installation_repositories" && body.action === "added" && body.installation) {
+      const installation = await this.installationRepo.findByGithubId(body.installation.id);
+      if (!installation) {
+        // No local record of this installation yet — POST /github/install hasn't run.
+        // Nothing to attach the new repos to; the eventual /install call's own sync
+        // (github.service.ts syncRepos) will pick them up.
+        return "Installation unknown";
+      }
+      for (const repo of body.repositories_added ?? []) {
+        await this.repoRepo.upsertFromGithub({
+          githubRepoId: repo.id,
+          fullName: repo.full_name,
+          language: null, // not present on installation_repositories webhook payloads
+          installationId: installation.id,
+        });
+      }
+      return "Repos synced";
+    }
     return "Event ignored";
   }
 

@@ -83,9 +83,27 @@ export class GithubService implements IGithubService {
       userId,
     });
 
-    // repoCount is always 0 immediately after install/re-install — repos are synced and
-    // activated in .ai/plans/backend.md Step 4. Only GET /installations aggregates real counts.
-    return { installation: sanitize(installation, 0) };
+    const repoCount = await this.syncRepos(installation);
+
+    return { installation: sanitize(installation, repoCount) };
+  }
+
+  // Best-effort: the Installation row above is already durably saved by the time this runs,
+  // so a GitHub API hiccup here shouldn't fail the whole /install call. A missed sync
+  // self-heals via the `installation_repositories.added` webhook (webhook.service.ts) or a
+  // later re-install. See .ai/knowledge/domains/github-app.md "Repo sync".
+  private async syncRepos(installation: Installation): Promise<number> {
+    try {
+      const repos = await this.githubApiClient.listInstallationRepos(
+        installation.githubInstallationId
+      );
+      for (const repo of repos) {
+        await this.repoRepo.upsertFromGithub({ ...repo, installationId: installation.id });
+      }
+      return repos.length;
+    } catch {
+      return 0;
+    }
   }
 
   async listInstallations(userId: string): Promise<ListInstallationsResult> {

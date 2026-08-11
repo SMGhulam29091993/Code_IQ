@@ -5,9 +5,10 @@ import { prisma } from "@codeiq/db";
 import { app } from "../app";
 import { redis } from "../lib/redis";
 
-const { mockGetInstallation, mockGetAuthenticated } = vi.hoisted(() => ({
+const { mockGetInstallation, mockGetAuthenticated, mockListRepos } = vi.hoisted(() => ({
   mockGetInstallation: vi.fn(),
   mockGetAuthenticated: vi.fn(),
+  mockListRepos: vi.fn(),
 }));
 
 // Mocked at the module boundary, same approach as auth.routes.test.ts, extended one layer
@@ -16,7 +17,7 @@ vi.mock("@codeiq/db", () => ({
   prisma: {
     user: { findUnique: vi.fn(), update: vi.fn() },
     installation: { findUnique: vi.fn(), upsert: vi.fn(), findMany: vi.fn(), update: vi.fn() },
-    repo: { updateMany: vi.fn() },
+    repo: { updateMany: vi.fn(), upsert: vi.fn() },
   },
 }));
 
@@ -38,7 +39,10 @@ vi.mock("nodemailer", () => ({
 vi.mock("@octokit/rest", () => ({
   Octokit: vi.fn().mockImplementation(() => ({
     rest: {
-      apps: { getInstallation: mockGetInstallation },
+      apps: {
+        getInstallation: mockGetInstallation,
+        listReposAccessibleToInstallation: mockListRepos,
+      },
       users: { getAuthenticated: mockGetAuthenticated },
     },
   })),
@@ -101,7 +105,7 @@ function mockPrisma() {
       findMany: ReturnType<typeof vi.fn>;
       update: ReturnType<typeof vi.fn>;
     };
-    repo: { updateMany: ReturnType<typeof vi.fn> };
+    repo: { updateMany: ReturnType<typeof vi.fn>; upsert: ReturnType<typeof vi.fn> };
   };
 }
 
@@ -116,6 +120,7 @@ function mockRedis() {
 describe("GitHub routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockListRepos.mockResolvedValue({ data: { repositories: [] } });
   });
 
   describe("GET /api/github/oauth/url", () => {
@@ -238,6 +243,32 @@ describe("GitHub routes", () => {
         .send({ installationId: 123 });
 
       expect(res.status).toBe(404);
+    });
+
+    it("syncs repos from GitHub and reflects the count in the response", async () => {
+      mockPrisma().user.findUnique.mockResolvedValueOnce(buildUser());
+      mockGetInstallation.mockResolvedValueOnce({
+        data: { account: { login: "acme", type: "Organization" } },
+      });
+      mockPrisma().installation.findUnique.mockResolvedValueOnce(null);
+      mockPrisma().installation.upsert.mockResolvedValueOnce(buildInstallation());
+      mockListRepos.mockResolvedValueOnce({
+        data: {
+          repositories: [
+            { id: 1, full_name: "acme/one", language: "TypeScript" },
+            { id: 2, full_name: "acme/two", language: null },
+          ],
+        },
+      });
+
+      const res = await request(app)
+        .post("/api/github/install")
+        .set("Authorization", `Bearer ${accessTokenFor("user-1")}`)
+        .send({ installationId: 123 });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data.installation.repoCount).toBe(2);
+      expect(mockPrisma().repo.upsert).toHaveBeenCalledTimes(2);
     });
   });
 
