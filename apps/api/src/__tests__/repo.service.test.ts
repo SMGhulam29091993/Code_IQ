@@ -4,6 +4,7 @@ import { ForbiddenError, NotFoundError } from "../lib/errors";
 import type { IInstallationRepository } from "../modules/github/github.types";
 import { RepoService } from "../modules/repos/repo.service";
 import type { IRepoConfigRepository, IRepoRepository, RepoWithConfigAndOwner } from "../modules/repos/repo.types";
+import type { IReviewRepository } from "../modules/reviews/review.types";
 
 const NOW = new Date("2026-01-01T00:00:00Z");
 
@@ -59,6 +60,7 @@ describe("RepoService", () => {
   let repoRepo: IRepoRepository;
   let repoConfigRepo: IRepoConfigRepository;
   let installationRepo: IInstallationRepository;
+  let reviewRepo: IReviewRepository;
   let service: RepoService;
 
   beforeEach(() => {
@@ -84,8 +86,18 @@ describe("RepoService", () => {
       softDelete: vi.fn(),
       updateActiveByGithubId: vi.fn(),
     };
+    reviewRepo = {
+      findManyForUser: vi.fn(),
+      findById: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      countForUser: vi.fn().mockResolvedValue(0),
+      countIssuesBySeverityForUser: vi.fn().mockResolvedValue({}),
+      countIssuesByCategoryForUser: vi.fn().mockResolvedValue({}),
+      countIssuesByDayForUser: vi.fn().mockResolvedValue([]),
+    };
 
-    service = new RepoService(repoRepo, repoConfigRepo, installationRepo);
+    service = new RepoService(repoRepo, repoConfigRepo, installationRepo, reviewRepo);
   });
 
   describe("listRepos", () => {
@@ -339,13 +351,49 @@ describe("RepoService", () => {
       await expect(service.getStats("user-1", "repo-1")).rejects.toThrow(ForbiddenError);
     });
 
-    it("returns aggregate stats for an owned repo", async () => {
+    it("returns zeroed stats when the repo has no reviews yet", async () => {
       vi.mocked(repoRepo.findByIdForUser).mockResolvedValue(buildRepo());
 
       const result = await service.getStats("user-1", "repo-1");
 
       expect(result.totalReviews).toBe(0);
       expect(result.issuesBySeverity).toEqual({ critical: 0, warning: 0, info: 0 });
+      expect(result.issuesByCategory).toEqual({
+        bug: 0,
+        security: 0,
+        style: 0,
+        performance: 0,
+        logic: 0,
+      });
+      expect(result.recentTrend).toEqual([]);
+    });
+
+    it("aggregates real Review/ReviewIssue data scoped to the repo", async () => {
+      vi.mocked(repoRepo.findByIdForUser).mockResolvedValue(buildRepo());
+      vi.mocked(reviewRepo.countForUser).mockResolvedValue(5);
+      vi.mocked(reviewRepo.countIssuesBySeverityForUser).mockResolvedValue({
+        critical: 2,
+        warning: 3,
+      });
+      vi.mocked(reviewRepo.countIssuesByCategoryForUser).mockResolvedValue({ bug: 4, security: 1 });
+      vi.mocked(reviewRepo.countIssuesByDayForUser).mockResolvedValue([
+        { date: "2026-01-01", count: 2 },
+      ]);
+
+      const result = await service.getStats("user-1", "repo-1");
+
+      expect(reviewRepo.countForUser).toHaveBeenCalledWith("user-1", { repoId: "repo-1" });
+      expect(result.totalReviews).toBe(5);
+      expect(result.totalIssues).toBe(5);
+      expect(result.issuesBySeverity).toEqual({ critical: 2, warning: 3, info: 0 });
+      expect(result.issuesByCategory).toEqual({
+        bug: 4,
+        security: 1,
+        style: 0,
+        performance: 0,
+        logic: 0,
+      });
+      expect(result.recentTrend).toEqual([{ date: "2026-01-01", count: 2 }]);
     });
   });
 });

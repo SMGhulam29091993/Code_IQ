@@ -17,16 +17,22 @@ import type {
 } from "./repo.types";
 import { ForbiddenError, NotFoundError } from "../../lib/errors";
 import type { IInstallationRepository } from "../github/github.types";
+import type { IReviewRepository } from "../reviews/review.types";
 
 // FREE tier "3 repos max" limit — .ai/knowledge/domains/repos.md
 // "POST /repos/:repoId/activate" edge cases.
 const FREE_TIER_ACTIVE_REPO_LIMIT = 3;
 
+// Trend window for GET /repos/:repoId/stats's recentTrend — .ai/knowledge/domains/repos.md
+// "GET /repos/:repoId/stats" (fixed 30 days; totalReviews/totalIssues/breakdowns are all-time).
+const STATS_TREND_DAYS = 30;
+
 export class RepoService implements IRepoService {
   constructor(
     private readonly repoRepo: IRepoRepository,
     private readonly repoConfigRepo: IRepoConfigRepository,
-    private readonly installationRepo: IInstallationRepository
+    private readonly installationRepo: IInstallationRepository,
+    private readonly reviewRepo: IReviewRepository
   ) {}
 
   async listRepos(userId: string, filters: ListReposFilters): Promise<ListReposResult> {
@@ -91,14 +97,32 @@ export class RepoService implements IRepoService {
 
   async getStats(userId: string, repoId: string): Promise<RepoStatsResult> {
     await this.findOwnedRepo(userId, repoId);
-    // Review pipeline (Step 5) hasn't shipped, so this always reads real-but-empty Review/
-    // ReviewIssue tables today — same stance as webhook.service.ts's isOverPlanLimit count.
+
+    const trendSince = new Date(Date.now() - STATS_TREND_DAYS * 24 * 60 * 60 * 1000);
+    const [totalReviews, bySeverity, byCategory, recentTrend] = await Promise.all([
+      this.reviewRepo.countForUser(userId, { repoId }),
+      this.reviewRepo.countIssuesBySeverityForUser(userId, { repoId }),
+      this.reviewRepo.countIssuesByCategoryForUser(userId, { repoId }),
+      this.reviewRepo.countIssuesByDayForUser(userId, { repoId, since: trendSince }),
+    ]);
+    const totalIssues = Object.values(bySeverity).reduce((sum, n) => sum + n, 0);
+
     return {
-      totalReviews: 0,
-      totalIssues: 0,
-      issuesBySeverity: { critical: 0, warning: 0, info: 0 },
-      issuesByCategory: { bug: 0, security: 0, style: 0, performance: 0, logic: 0 },
-      recentTrend: [],
+      totalReviews,
+      totalIssues,
+      issuesBySeverity: {
+        critical: bySeverity.critical ?? 0,
+        warning: bySeverity.warning ?? 0,
+        info: bySeverity.info ?? 0,
+      },
+      issuesByCategory: {
+        bug: byCategory.bug ?? 0,
+        security: byCategory.security ?? 0,
+        style: byCategory.style ?? 0,
+        performance: byCategory.performance ?? 0,
+        logic: byCategory.logic ?? 0,
+      },
+      recentTrend,
     };
   }
 

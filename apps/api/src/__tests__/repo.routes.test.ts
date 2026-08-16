@@ -11,6 +11,7 @@ vi.mock("@codeiq/db", () => ({
     repo: { findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn(), count: vi.fn() },
     repoConfig: { upsert: vi.fn(), create: vi.fn() },
     review: { count: vi.fn() },
+    reviewIssue: { groupBy: vi.fn().mockResolvedValue([]), findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
 
@@ -298,6 +299,7 @@ describe("Repo routes", () => {
   describe("GET /api/repos/:repoId/stats", () => {
     it("returns aggregate stats for an owned repo", async () => {
       mockPrisma().repo.findUnique.mockResolvedValueOnce(buildRepo());
+      mockPrisma().review.count.mockResolvedValueOnce(0);
 
       const res = await auth(request(app).get("/api/repos/repo-1/stats"));
 

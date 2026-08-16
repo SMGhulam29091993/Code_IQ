@@ -37,6 +37,9 @@ const envSchema = z.object({
   // 32-byte key (hex-encoded, 64 chars) for AES-256-GCM encryption of githubAccessToken at
   // rest — see .ai/rules/security.md security-hardening-backlog "GitHub token encryption".
   ENCRYPTION_KEY: z.string().length(64, "ENCRYPTION_KEY must be a 64-char hex string (32 bytes)"),
+
+  // Gemini 1.5 Pro — review pipeline (.ai/plans/backend.md Step 5).
+  GEMINI_API_KEY: z.string().min(1),
 }).refine((e) => e.JWT_SECRET !== e.JWT_REFRESH_SECRET, {
   message: "JWT_SECRET and JWT_REFRESH_SECRET must be different values (.ai/rules/security.md #5)",
   path: ["JWT_REFRESH_SECRET"],
