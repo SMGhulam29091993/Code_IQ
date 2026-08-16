@@ -157,8 +157,11 @@ Response includes:
 
 ### GET /api/reviews/stats
 - Auth: JWT
-- Query: `{ repoId?, days? }`
-- 200: `{ totalReviews, totalIssues, issuesBySeverity, issuesByCategory, dailyTrend }`
+- Query: `{ repoId?, days? }` (days default 30, max 90)
+- 200: `{ totalReviews, totalIssues, issuesBySeverity, issuesByCategory, recentTrend }`
+  — `totalReviews`/`totalIssues`/breakdowns and `recentTrend` are all scoped to the `days`
+  window (unlike `GET /api/repos/:repoId/stats`, whose breakdowns are all-time and only
+  `recentTrend` is windowed, fixed at 30 days).
 
 ---
 

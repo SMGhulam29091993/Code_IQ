@@ -450,3 +450,46 @@ describe('CommentService.postReview', () => {
   it('handles empty issues array (posts summary-only review)')
 })
 ```
+
+---
+
+## Implementation notes (discovered during Step 5)
+
+- **Ownership-check pattern for `GET/POST /reviews/:reviewId*`.** `IReviewRepository.findById`
+  is deliberately *not* pre-scoped to `userId` (unlike `findManyForUser`, which is) — it fetches
+  by `reviewId` alone, including `repo.installation.userId`, and `ReviewService`'s private
+  `findOwnedReview` does the ownership check itself. This is what lets it return 404 for an
+  unknown `reviewId` and 403 for one that belongs to another user, matching the edge-case table
+  above — the same split `modules/repos/repo.service.ts`'s `findOwnedRepo` uses (see
+  `repos.md`'s implementation notes for pitfall #005's tenant-isolation stance).
+- **`GET /reviews/stats` scopes every field to the `days` window** — `totalReviews`,
+  `totalIssues`, both breakdowns, and `recentTrend` are all filtered by `ReviewIssue.createdAt >=
+  now - days`. This isn't explicit in the acceptance criteria above (only `recentTrend` says "for
+  the `days` window"), but treating the other three inconsistently would make the `days` query
+  param meaningless for them. `GET /repos/:repoId/stats` (`repos.md`) intentionally does *not*
+  follow this — its totals are all-time and only `recentTrend` is windowed (fixed 30 days) — so
+  don't assume the two stats endpoints share a filtering convention.
+- **`ReviewJobProcessor` (not `review.job.ts` as a bare function) is the pipeline entry point.**
+  It's a class taking all seven dependencies via constructor (mirrors every other module's
+  DI pattern) with a single `process(job)` method; `container.ts` wires the concrete instance as
+  `reviewJobProcessor`, and `jobs/worker.ts`'s `startReviewWorker(processor)` is what `server.ts`
+  calls at boot to register the BullMQ consumer. Nothing else calls `.process()` directly.
+- **Retry re-enqueues with `jobId: retry-${reviewId}`**, not the original GitHub delivery ID —
+  `ReviewService.retryReview` has no delivery ID to reuse. This still gets BullMQ's dedup
+  protection (pitfall #004) if a user double-clicks retry while the first retry is in flight.
+- **`postSummaryComment` (a `RepoConfig` field) is not consulted by the pipeline.** Step 11 of
+  the pseudocode above always calls `commentService.postReview`, unconditionally — there's no
+  gate in this doc's pseudocode, so `ReviewJobProcessor` doesn't add one. The field exists in
+  the schema and `modules/repos`' config CRUD but currently has no effect on review behavior;
+  flag this if a future step is expected to make it do something.
+- **`micromatch`'s `{ basename: true }` option does not behave as "apply basename matching only
+  to slash-less patterns"** — passing it globally broke matching for slash-containing patterns
+  like `"dist/**"` (verified empirically: `isMatch('dist/out.js', 'dist/**', {basename:true})` →
+  `false`). `diff.service.ts`'s `filterFiles` branches on `pattern.includes("/")` itself:
+  slash-less patterns (e.g. `"*.test.ts"`) get `{ basename: true }` so they match at any depth
+  like `.gitignore`; patterns with a slash match the full path only, with no options passed.
+- **`GeminiService` depends on `IGeminiClient`, not the `@google/generative-ai` SDK's own
+  `GenerativeModel` type** — a narrow interface (`generateContent` only) declared in
+  `review.types.ts`. `lib/gemini.ts` constructs the real `GenerativeModel` via
+  `genAI.getGenerativeModel(...)` and types the export against `IGeminiClient`, so unit tests
+  mock a plain object instead of the SDK, same pattern as `IGithubApiClient`.

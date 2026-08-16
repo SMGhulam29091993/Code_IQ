@@ -222,12 +222,12 @@ describe('ConfigService.getEffectiveConfig', () => {
 
 ## Implementation notes (discovered during Step 4)
 
-- **`config.service.ts` isn't wired into any Step 4 route.** `GET`/`PATCH /repos/:repoId/config`
-  read and write the raw `RepoConfig` DB row only (matching their documented acceptance
-  criteria — no `.codeiq.yml` merge). `ConfigService.getEffectiveConfig` takes an installation
-  `Octokit` + `owner`/`repo`, which only exist once a review is actually running — it's built
-  now and unit-tested, but its first real caller is the review pipeline
-  (`.ai/plans/backend.md` Step 5).
+- **`config.service.ts` isn't wired into any Step 4 route** (still true as of Step 5).
+  `GET`/`PATCH /repos/:repoId/config` read and write the raw `RepoConfig` DB row only (matching
+  their documented acceptance criteria — no `.codeiq.yml` merge). `ConfigService.getEffectiveConfig`
+  takes an installation `Octokit` + `owner`/`repo`, which only exist once a review is actually
+  running — its first and only real caller is `jobs/review.job.ts`'s pipeline, wired in Step 5
+  (`.ai/knowledge/domains/review.md`).
 - **Default config: schema.prisma's column `@default` on `ignorePatterns` doesn't match this
   doc's default.** The Prisma column default is `["*.test.ts", "*.spec.ts", "dist/**"]` (missing
   `"node_modules/**"`). `repo-config.repository.ts`'s `createDefault`/`upsertPartial` never rely
@@ -244,8 +244,10 @@ describe('ConfigService.getEffectiveConfig', () => {
   `"Installation not found"`; known but owned by another user → 403 `"Forbidden"`. The
   documented edge case only mentions the 403 case; the 404 split follows the same convention
   already used by `installation.middleware.ts` (`.ai/knowledge/domains/github-app.md`).
-- **`GET /repos/:repoId/stats` currently always returns zeros.** The route, auth, and
-  ownership check are real; the actual `Review`/`ReviewIssue` aggregation queries are left for
-  whoever wires up the review pipeline in Step 5, once there's real data to aggregate. No
-  edge cases were documented for this endpoint in the spec above, so this is a placeholder
-  return, not a bug.
+- **`GET /repos/:repoId/stats` now returns real aggregates (Step 5).** `RepoService.getStats`
+  was given a fourth constructor dependency, `modules/reviews/review.repository.ts`'s
+  `IReviewRepository`, and reuses its `countForUser`/`countIssuesBySeverityForUser`/
+  `countIssuesByCategoryForUser`/`countIssuesByDayForUser` methods scoped by `repoId`.
+  `totalReviews`/`totalIssues`/the severity+category breakdowns are all-time (no `days` filter,
+  unlike `GET /reviews/stats`); `recentTrend` is fixed at the last 30 days per this doc's
+  response shape above.
