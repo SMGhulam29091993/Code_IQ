@@ -13,6 +13,7 @@
   "dependencies": {
     "@codeiq/db": "workspace:*",
     "@codeiq/types": "workspace:*",
+    "@google/generative-ai": "^0.21.0",
     "@octokit/auth-app": "^6.1.4",
     "@octokit/rest": "^19.0.13",
     "bcrypt": "^5.1.1",
@@ -25,6 +26,7 @@
     "ioredis": "^5.4.1",
     "js-yaml": "^5.2.3",
     "jsonwebtoken": "^9.0.2",
+    "micromatch": "^4.0.8",
     "nodemailer": "^6.9.16",
     "zod": "^3.23.8"
   },
@@ -36,6 +38,7 @@
     "@types/express": "^5.0.0",
     "@types/js-yaml": "^4.0.9",
     "@types/jsonwebtoken": "^9.0.7",
+    "@types/micromatch": "^4.0.9",
     "@types/node": "^22.9.0",
     "@types/nodemailer": "^6.4.16",
     "@types/supertest": "^6.0.2",

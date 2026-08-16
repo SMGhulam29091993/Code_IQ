@@ -1,4 +1,6 @@
 import { app } from "./app";
+import { reviewJobProcessor } from "./container";
+import { startReviewWorker } from "./jobs/worker";
 import { env } from "./lib/env";
 import { prisma } from "./lib/prisma";
 import { redis } from "./lib/redis";
@@ -10,7 +12,7 @@ async function main() {
   await prisma.$connect();
   await redis.ping();
 
-  // BullMQ workers register here starting in .ai/plans/backend.md Step 5.
+  startReviewWorker(reviewJobProcessor);
 
   app.listen(env.PORT, () => {
     console.log(`API listening on port ${env.PORT}`);

@@ -26,3 +26,4 @@ process.env.GITHUB_OAUTH_REDIRECT_URI =
   process.env.GITHUB_OAUTH_REDIRECT_URI ?? "http://localhost:4000/api/github/oauth/callback";
 process.env.ENCRYPTION_KEY =
   process.env.ENCRYPTION_KEY ?? "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".slice(0, 64);
+process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "test-gemini-api-key";

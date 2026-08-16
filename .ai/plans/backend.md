@@ -79,19 +79,33 @@
 - Domain: `knowledge/domains/repos.md` ✓ (Implementation notes section added) and
   `knowledge/domains/github-app.md` ✓ (repo-sync open question resolved)
 
-## Step 5 — Review pipeline [ not-started ]
-- [ ] `src/jobs/queue.ts`: BullMQ review-queue init
-- [ ] `src/jobs/worker.ts`: register workers + concurrency config
-- [ ] `diff.service.ts`: filterFiles + chunkFiles
-- [ ] `src/lib/gemini.ts`: Gemini client singleton
-- [ ] `gemini.service.ts`: reviewDiff + summarizePR
-- [ ] `comment.service.ts`: postReview
-- [ ] `review.repository.ts`, `review-issue.repository.ts`
-- [ ] `review.service.ts`: list, get, retry, stats
-- [ ] `src/jobs/review.job.ts`: full pipeline (steps 1–12 from `knowledge/domains/review.md`)
-- [ ] `review.controller.ts`, `review.routes.ts`
-- [ ] Unit tests: all cases from `knowledge/domains/review.md`
-- Domain: `knowledge/domains/review.md` ✓
+## Step 5 — Review pipeline [ complete ]
+- [x] `src/jobs/queue.ts`: BullMQ review-queue init (producer existed since Step 3; added
+  `defaultJobOptions` — 3 attempts, exponential backoff — per this doc's pipeline pseudocode)
+- [x] `src/jobs/worker.ts`: register workers + concurrency config (`startReviewWorker`, called
+  from `server.ts`'s startup sequence)
+- [x] `modules/reviews/diff.service.ts`: filterFiles + chunkFiles
+- [x] `src/lib/gemini.ts`: Gemini client singleton (`@google/generative-ai`, `gemini-1.5-pro`,
+  typed against the narrow `IGeminiClient` interface, not the SDK's own type)
+- [x] `modules/reviews/gemini.service.ts`: reviewDiff + summarizePR
+- [x] `modules/reviews/comment.service.ts`: postReview
+- [x] `modules/reviews/review.repository.ts`, `review-issue.repository.ts`
+- [x] `modules/reviews/review.service.ts`: list, get, retry, stats
+- [x] `src/jobs/review.job.ts`: `ReviewJobProcessor` class, full pipeline (steps 1–12 from
+  `knowledge/domains/review.md`)
+- [x] `modules/reviews/review.controller.ts`, `review.routes.ts` + mounted at `/reviews` in
+  `routes/index.ts` + wired through `container.ts`
+- [x] First real caller of `modules/repos/config.service.ts`'s `getEffectiveConfig` (built in
+  Step 4, unwired until now) and of `GET /repos/:repoId/stats`'s real aggregation (`RepoService`
+  given a fourth `IReviewRepository` dependency)
+- [x] Unit tests: `diff.service.test.ts` (11), `gemini.service.test.ts` (9),
+  `comment.service.test.ts` (7), `review.service.test.ts` (22), `review.job.test.ts` (11)
+- [x] Integration tests: `review.routes.test.ts` (15), plus repo-stats coverage added to
+  `repo.routes.test.ts`/`repo.service.test.ts`
+- Verified: `pnpm typecheck`, `pnpm lint`, `pnpm build`, and `pnpm test` (238/238) all pass
+  clean for `@codeiq/api`.
+- Domain: `knowledge/domains/review.md` ✓ (Implementation notes section added) and
+  `knowledge/domains/repos.md` ✓ (config.service.ts wiring + real stats aggregation noted)
 
 ## Step 6 — Billing module [ not-started ]
 - [ ] `src/lib/stripe.ts`: Stripe client singleton
