@@ -1,6 +1,29 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-08-16 (Step 5)
+- Backend Step 5 (Review pipeline) complete, on feature branch `feat/review-pipeline` (first
+  step built off a branch rather than directly on `Dev`). `modules/reviews/`: `review.types.ts`/
+  `review.validator.ts`, `diff.service.ts` (filterFiles/chunkFiles — 300-line chunks with
+  20-line overlap), `gemini.service.ts` (reviewDiff/summarizePR against a narrow `IGeminiClient`
+  interface, not the `@google/generative-ai` SDK type directly), `comment.service.ts`
+  (postReview — single batched GitHub review, `event: COMMENT`), `review.repository.ts`/
+  `review-issue.repository.ts`, `review.service.ts` (list/get/retry/stats),
+  `review.controller.ts`/`review.routes.ts` mounted at `/reviews`. `src/lib/gemini.ts` (Gemini
+  1.5 Pro client singleton), `src/jobs/review.job.ts` (`ReviewJobProcessor` class, full 12-step
+  pipeline), `src/jobs/worker.ts` (`startReviewWorker`, registered in `server.ts`'s startup
+  sequence). `jobs/queue.ts` gained `defaultJobOptions` (3 attempts, exponential backoff).
+  `RepoService.getStats` (Step 4) rewired from placeholder zeros to real aggregation via a new
+  `IReviewRepository` dependency; `config.service.ts`'s `getEffectiveConfig` (built in Step 4,
+  unwired since) got its first real caller. Added `@google/generative-ai` and `micromatch`
+  dependencies plus `GEMINI_API_KEY` to `env.ts`/`.env.example`. 75 new tests (60 unit + 15
+  integration) — `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm test` (238/238) all pass
+  clean. Along the way: found and fixed that micromatch's `{ basename: true }` option breaks
+  matching for slash-containing ignore patterns like `"dist/**"` — `diff.service.ts` branches on
+  whether the pattern contains a slash instead. `knowledge/domains/review.md` (implementation
+  notes added) and `knowledge/domains/repos.md` (config.service.ts wiring + real stats
+  aggregation noted) updated.
+
 ## 2026-08-11 (Step 4)
 - Backend Step 4 (Repos module) complete, in two parts:
   1. **Repo sync from GitHub** (resolves the open question flagged at the end of Step 3 — no
