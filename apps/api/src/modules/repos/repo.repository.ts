@@ -35,4 +35,18 @@ export class RepoRepository implements IRepoRepository {
   countReviews(repoId: string) {
     return prisma.review.count({ where: { repoId } });
   }
+
+  async findActiveIdsForInstallationByRecency(installationId: string) {
+    const rows = await prisma.repo.findMany({
+      where: { installationId, isActive: true },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    return rows.map((r) => r.id);
+  }
+
+  async setActiveMany(repoIds: string[], isActive: boolean) {
+    if (repoIds.length === 0) return;
+    await prisma.repo.updateMany({ where: { id: { in: repoIds } }, data: { isActive } });
+  }
 }

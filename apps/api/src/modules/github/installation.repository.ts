@@ -1,4 +1,4 @@
-import { prisma } from "@codeiq/db";
+import { prisma, type PlanTier } from "@codeiq/db";
 import type { IInstallationRepository } from "./github.types";
 
 export class InstallationRepository implements IInstallationRepository {
@@ -8,6 +8,32 @@ export class InstallationRepository implements IInstallationRepository {
 
   findById(id: string) {
     return prisma.installation.findUnique({ where: { id } });
+  }
+
+  // Billing (.ai/plans/backend.md Step 6) treats billing as one-per-user: the most recently
+  // created active installation is the one checkout/portal act on. See
+  // .ai/knowledge/domains/billing.md implementation notes.
+  findByUserId(userId: string) {
+    return prisma.installation.findFirst({
+      where: { userId, isActive: true },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  findByStripeSubId(stripeSubId: string) {
+    return prisma.installation.findFirst({ where: { stripeSubId } });
+  }
+
+  async updateBilling(
+    installationId: string,
+    data: Partial<{
+      stripeCustomerId: string;
+      stripeSubId: string | null;
+      planTier: PlanTier;
+      seatCount: number;
+    }>
+  ) {
+    await prisma.installation.update({ where: { id: installationId }, data });
   }
 
   upsert(data: {

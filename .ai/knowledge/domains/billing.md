@@ -190,3 +190,40 @@ describe('BillingService.handleStripeWebhook', () => {
   it('saves event.id to processed events for idempotency')
 })
 ```
+
+---
+
+## Implementation notes (discovered during Step 6)
+
+- **`GET /billing/plans` response shape deviates from `api-guidelines.md`'s original
+  `{ tier, price, seats, limits }` sketch.** Implemented as
+  `{ tier, price, repoLimit, reviewLimit, aiQueries, stripePriceId }` — `price` is USD/seat/month
+  (0 for FREE), `repoLimit`/`reviewLimit` are `null` when unlimited, `stripePriceId` is `null`
+  for FREE. `api-guidelines.md` updated to match.
+- **Billing treats "installation" as one-per-user.** `createCheckout`/`createPortal` take only
+  `userId` (per this doc's own pseudocode), but `Installation` is actually `User` 1:N — a user
+  can have multiple GitHub App installations (`.ai/knowledge/domains/github-app.md`). Resolved
+  by adding `InstallationRepository.findByUserId`, which returns the most-recently-created
+  **active** installation for that user. This is a real product gap (multi-installation orgs
+  can only bill their newest installation) flagged here rather than silently designed around —
+  revisit if/when billing needs to be scoped per-installation instead of per-user.
+- **`enforceFreeTierLimit` (called from `customer.subscription.deleted`) lives on
+  `RepoService`, not `BillingService`.** Billing has no business reasoning about which repos to
+  keep active — that's `RepoService`'s domain (`.ai/knowledge/domains/repos.md`'s FREE-tier
+  3-repo rule). `BillingService` only calls `repoService.enforceFreeTierLimit(installationId)`
+  after downgrading. New `IRepoRepository` methods:
+  `findActiveIdsForInstallationByRecency` (most-recently-created first) and `setActiveMany`.
+- **`customer.subscription.updated` doesn't call `stripe.subscriptions.retrieve`** — unlike
+  `checkout.session.completed`, the full subscription object (including `items.data`) already
+  arrives as `event.data.object`, so `applySubscriptionToInstallation` reads it directly.
+- **`IStripeClient` is a narrow interface**, not the `stripe` SDK's own `Stripe` type —
+  `BillingService` depends only on the five method groups it actually calls
+  (`customers.create`, `checkout.sessions.create`, `billingPortal.sessions.create`,
+  `subscriptions.retrieve`, `webhooks.constructEvent`). Same stance as `review.md`'s
+  `IGeminiClient` vs. `@google/generative-ai`'s `GenerativeModel`. `src/lib/stripe.ts` exports
+  the real Stripe client typed against this interface.
+- **Unrecognized Stripe price ID on a subscription** (shouldn't happen outside of Stripe
+  dashboard misconfiguration) logs an error and skips the update rather than throwing — a
+  malformed/unmapped subscription must not break webhook idempotency (the event is already
+  marked processed by that point) or return a non-200 to Stripe (which would trigger retries
+  that can't succeed).

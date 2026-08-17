@@ -1,6 +1,30 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-08-17 (Step 6)
+- Backend Step 6 (Billing module) complete, on feature branch `feat/billing-module`. Added
+  `stripe` dependency, `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`/`STRIPE_PRICE_ID_PRO`/
+  `STRIPE_PRICE_ID_TEAM` to `env.ts`/`.env`/`.env.example`. `src/lib/stripe.ts` (Stripe client
+  singleton, typed against a narrow `IStripeClient` — same stance as `lib/gemini.ts`'s
+  `IGeminiClient`, not the SDK's own type). `modules/billing/`: `billing.types.ts`/
+  `billing.validator.ts`, `processed-event.repository.ts` (`ProcessedStripeEvent` idempotency),
+  `billing.service.ts` (getPlans/createCheckout/createPortal/handleStripeWebhook — all edge
+  cases from `knowledge/domains/billing.md`), `billing.controller.ts`/`billing.routes.ts`
+  mounted at `/billing`, wired through `container.ts`. `app.ts`'s raw-body mount generalized
+  from a single `/api/webhooks` prefix to a list (`RAW_BODY_PATHS`) covering
+  `/api/billing/webhook` too, ahead of the global `express.json()` (pitfall #001 applies here
+  too). `InstallationRepository` extended with `findByUserId` (billing treats installation as
+  one-per-user — see billing.md implementation notes for the multi-installation caveat this
+  creates), `findByStripeSubId`, `updateBilling`. `RepoService` gained `enforceFreeTierLimit`
+  (called on `customer.subscription.deleted`, deactivates active repos beyond the FREE tier's
+  3-most-recent), backed by two new `IRepoRepository` methods
+  (`findActiveIdsForInstallationByRecency`/`setActiveMany`). 34 new tests (23 unit in
+  `billing.service.test.ts` + 2 `enforceFreeTierLimit` cases in `repo.service.test.ts` + 11
+  integration in `billing.routes.test.ts`) — `pnpm typecheck`, `pnpm lint`, `pnpm build`, and
+  `pnpm test` (274/274) all pass clean. `knowledge/domains/billing.md` (implementation notes
+  added) and `knowledge/technical/backend/api-guidelines.md` (`GET /billing/plans`'s actual
+  response shape, which deviates from the doc's original sketch) updated.
+
 ## 2026-08-16 (Step 5)
 - Backend Step 5 (Review pipeline) complete, on feature branch `feat/review-pipeline` (first
   step built off a branch rather than directly on `Dev`). `modules/reviews/`: `review.types.ts`/
