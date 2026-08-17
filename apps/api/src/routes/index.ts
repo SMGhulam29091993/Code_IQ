@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { authRoutes } from "../modules/auth/auth.routes";
+import { billingRoutes } from "../modules/billing/billing.routes";
 import { githubRoutes } from "../modules/github/github.routes";
 import { webhookRoutes } from "../modules/github/webhook.routes";
 import { repoRoutes } from "../modules/repos/repo.routes";
@@ -13,3 +14,4 @@ router.use("/github", githubRoutes);
 router.use("/webhooks", webhookRoutes);
 router.use("/repos", repoRoutes);
 router.use("/reviews", reviewRoutes);
+router.use("/billing", billingRoutes);

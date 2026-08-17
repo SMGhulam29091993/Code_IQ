@@ -8,13 +8,20 @@ export const app = express();
 
 app.use(helmet());
 app.use(cors());
-// GitHub (`/webhooks/*`) and Stripe (`/billing/webhook`, Step 6) routes need the raw body
-// for signature verification (.ai/rules/security.md #3, #6) — see webhook.middleware.ts and
-// pitfall 001. express.raw() is mounted on the exact webhook prefix before express.json()
-// runs, and express.json() explicitly skips that prefix so the stream is never read twice.
-app.use("/api/webhooks", express.raw({ type: "application/json" }));
+// GitHub (`/webhooks/*`) and Stripe (`/billing/webhook`) routes need the raw body for
+// signature verification (.ai/rules/security.md #3, #6) — see webhook.middleware.ts,
+// billing.controller.ts, and pitfall 001. express.raw() is mounted on each exact webhook path
+// before express.json() runs, and express.json() explicitly skips those paths so the stream is
+// never read twice.
+const RAW_BODY_PATHS = ["/api/webhooks", "/api/billing/webhook"];
 app.use((req, res, next) => {
-  if (req.path.startsWith("/api/webhooks")) return next();
+  if (RAW_BODY_PATHS.some((p) => req.path.startsWith(p))) {
+    return express.raw({ type: "application/json" })(req, res, next);
+  }
+  return next();
+});
+app.use((req, res, next) => {
+  if (RAW_BODY_PATHS.some((p) => req.path.startsWith(p))) return next();
   return express.json()(req, res, next);
 });
 

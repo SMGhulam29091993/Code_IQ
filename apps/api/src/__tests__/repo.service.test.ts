@@ -72,6 +72,8 @@ describe("RepoService", () => {
       setActive: vi.fn(),
       countActiveForInstallation: vi.fn(),
       countReviews: vi.fn(),
+      findActiveIdsForInstallationByRecency: vi.fn(),
+      setActiveMany: vi.fn(),
     };
     repoConfigRepo = {
       findByRepoId: vi.fn(),
@@ -394,6 +396,34 @@ describe("RepoService", () => {
         logic: 0,
       });
       expect(result.recentTrend).toEqual([{ date: "2026-01-01", count: 2 }]);
+    });
+  });
+
+  describe("enforceFreeTierLimit", () => {
+    it("deactivates active repos beyond the 3 most recent", async () => {
+      vi.mocked(repoRepo.findActiveIdsForInstallationByRecency).mockResolvedValue([
+        "repo-1",
+        "repo-2",
+        "repo-3",
+        "repo-4",
+        "repo-5",
+      ]);
+
+      await service.enforceFreeTierLimit("install-1");
+
+      expect(repoRepo.findActiveIdsForInstallationByRecency).toHaveBeenCalledWith("install-1");
+      expect(repoRepo.setActiveMany).toHaveBeenCalledWith(["repo-4", "repo-5"], false);
+    });
+
+    it("does nothing when active repo count is within the limit", async () => {
+      vi.mocked(repoRepo.findActiveIdsForInstallationByRecency).mockResolvedValue([
+        "repo-1",
+        "repo-2",
+      ]);
+
+      await service.enforceFreeTierLimit("install-1");
+
+      expect(repoRepo.setActiveMany).toHaveBeenCalledWith([], false);
     });
   });
 });
