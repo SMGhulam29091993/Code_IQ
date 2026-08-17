@@ -40,6 +40,13 @@ const envSchema = z.object({
 
   // Gemini 1.5 Pro — review pipeline (.ai/plans/backend.md Step 5).
   GEMINI_API_KEY: z.string().min(1),
+
+  // Stripe — billing module (.ai/plans/backend.md Step 6). Price IDs map 1:1 to
+  // PlanTier ('FREE' has none — it's never checked out). See .ai/knowledge/domains/billing.md.
+  STRIPE_SECRET_KEY: z.string().min(1),
+  STRIPE_WEBHOOK_SECRET: z.string().min(1),
+  STRIPE_PRICE_ID_PRO: z.string().min(1),
+  STRIPE_PRICE_ID_TEAM: z.string().min(1),
 }).refine((e) => e.JWT_SECRET !== e.JWT_REFRESH_SECRET, {
   message: "JWT_SECRET and JWT_REFRESH_SECRET must be different values (.ai/rules/security.md #5)",
   path: ["JWT_REFRESH_SECRET"],

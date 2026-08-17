@@ -169,7 +169,9 @@ Response includes:
 
 ### GET /api/billing/plans
 - Auth: none
-- 200: `{ plans: [{ tier, price, seats, limits }] }`
+- 200: `{ plans: [{ tier, price, repoLimit, reviewLimit, aiQueries, stripePriceId }] }` —
+  `price` is USD/seat/month (0 for FREE); `repoLimit`/`reviewLimit` are `null` when unlimited;
+  `stripePriceId` is `null` for FREE (never checked out)
 
 ### POST /api/billing/checkout
 - Auth: JWT

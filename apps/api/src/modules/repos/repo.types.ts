@@ -83,6 +83,11 @@ export interface IRepoRepository {
   // FREE tier "3 repos max" limit (.ai/knowledge/domains/repos.md activate edge cases).
   countActiveForInstallation(installationId: string): Promise<number>;
   countReviews(repoId: string): Promise<number>;
+  // Active repo ids for an installation, most-recently-created first — feeds
+  // enforceFreeTierLimit's "keep 3 most recent" rule
+  // (.ai/knowledge/domains/billing.md "customer.subscription.deleted").
+  findActiveIdsForInstallationByRecency(installationId: string): Promise<string[]>;
+  setActiveMany(repoIds: string[], isActive: boolean): Promise<void>;
 }
 
 export interface IRepoConfigRepository {
@@ -104,4 +109,7 @@ export interface IRepoService {
     input: UpdateConfigInput
   ): Promise<UpdateConfigResult>;
   getStats(userId: string, repoId: string): Promise<RepoStatsResult>;
+  // Called from BillingService on `customer.subscription.deleted` — deactivates every active
+  // repo beyond the FREE tier's 3-most-recent (.ai/knowledge/domains/billing.md).
+  enforceFreeTierLimit(installationId: string): Promise<void>;
 }
