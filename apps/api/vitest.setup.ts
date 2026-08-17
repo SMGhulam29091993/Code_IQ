@@ -27,3 +27,7 @@ process.env.GITHUB_OAUTH_REDIRECT_URI =
 process.env.ENCRYPTION_KEY =
   process.env.ENCRYPTION_KEY ?? "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".slice(0, 64);
 process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "test-gemini-api-key";
+process.env.STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY ?? "sk_test_dummy";
+process.env.STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET ?? "whsec_test_dummy";
+process.env.STRIPE_PRICE_ID_PRO = process.env.STRIPE_PRICE_ID_PRO ?? "price_test_pro";
+process.env.STRIPE_PRICE_ID_TEAM = process.env.STRIPE_PRICE_ID_TEAM ?? "price_test_team";

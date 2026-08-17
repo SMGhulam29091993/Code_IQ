@@ -28,6 +28,7 @@
     "jsonwebtoken": "^9.0.2",
     "micromatch": "^4.0.8",
     "nodemailer": "^6.9.16",
+    "stripe": "^22.5.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

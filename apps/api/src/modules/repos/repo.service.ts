@@ -126,6 +126,12 @@ export class RepoService implements IRepoService {
     };
   }
 
+  async enforceFreeTierLimit(installationId: string): Promise<void> {
+    const activeIds = await this.repoRepo.findActiveIdsForInstallationByRecency(installationId);
+    const excess = activeIds.slice(FREE_TIER_ACTIVE_REPO_LIMIT);
+    await this.repoRepo.setActiveMany(excess, false);
+  }
+
   private async findOwnedRepo(userId: string, repoId: string): Promise<RepoWithConfigAndOwner> {
     const repo = await this.repoRepo.findByIdForUser(repoId);
     if (!repo) {
