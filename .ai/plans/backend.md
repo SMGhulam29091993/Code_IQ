@@ -107,13 +107,24 @@
 - Domain: `knowledge/domains/review.md` ✓ (Implementation notes section added) and
   `knowledge/domains/repos.md` ✓ (config.service.ts wiring + real stats aggregation noted)
 
-## Step 6 — Billing module [ not-started ]
-- [ ] `src/lib/stripe.ts`: Stripe client singleton
-- [ ] `billing.service.ts` (plans, checkout, portal, webhook handler)
-- [ ] `billing.controller.ts`, `billing.routes.ts` (Stripe route uses express.raw)
-- [ ] Stripe webhook: idempotency via ProcessedEvent table
-- [ ] Unit tests: all cases from `knowledge/domains/billing.md`
-- Domain: `knowledge/domains/billing.md` ✓
+## Step 6 — Billing module [ complete ]
+- [x] `src/lib/stripe.ts`: Stripe client singleton (typed against a narrow `IStripeClient`,
+  not the `stripe` SDK's own type — same stance as `lib/gemini.ts`'s `IGeminiClient`)
+- [x] `billing.service.ts` (plans, checkout, portal, webhook handler)
+- [x] `billing.controller.ts`, `billing.routes.ts` (Stripe route uses express.raw) + mounted
+  at `/billing` in `routes/index.ts` + wired through `container.ts`
+- [x] Stripe webhook: idempotency via `ProcessedStripeEvent` table
+  (`processed-event.repository.ts`)
+- [x] `RepoService.enforceFreeTierLimit` (new) — called from `customer.subscription.deleted`,
+  deactivates active repos beyond the FREE tier's 3-most-recent; new `IRepoRepository` methods
+  `findActiveIdsForInstallationByRecency`/`setActiveMany`
+- [x] `InstallationRepository` extended with `findByUserId`/`findByStripeSubId`/`updateBilling`
+- [x] Unit tests: `billing.service.test.ts` (23, all cases from `knowledge/domains/billing.md`),
+  plus `enforceFreeTierLimit` coverage added to `repo.service.test.ts`
+- [x] Integration tests: `billing.routes.test.ts` (11)
+- Verified: `pnpm typecheck`, `pnpm lint`, `pnpm build`, and `pnpm test` (274/274) all pass
+  clean for `@codeiq/api`.
+- Domain: `knowledge/domains/billing.md` ✓ (Implementation notes section added)
 
 ## Step 7 — Deploy [ not-started ]
 - [ ] Dockerfile for apps/api
