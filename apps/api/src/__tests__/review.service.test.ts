@@ -77,6 +77,8 @@ describe("ReviewService", () => {
       setActive: vi.fn(),
       countActiveForInstallation: vi.fn(),
       countReviews: vi.fn(),
+      findActiveIdsForInstallationByRecency: vi.fn(),
+      setActiveMany: vi.fn(),
     };
 
     service = new ReviewService(reviewRepo, repoRepo);

@@ -4,11 +4,15 @@
 // src/routes/index.ts. Populated starting with the auth module (.ai/plans/backend.md Step 2).
 import { ReviewJobProcessor } from "./jobs/review.job";
 import { geminiModel } from "./lib/gemini";
+import { stripeClient } from "./lib/stripe";
 import { AuthController } from "./modules/auth/auth.controller";
 import { AuthService } from "./modules/auth/auth.service";
 import { OtpRepository } from "./modules/auth/otp.repository";
 import { RefreshTokenRepository } from "./modules/auth/refresh-token.repository";
 import { UserRepository } from "./modules/auth/user.repository";
+import { BillingController } from "./modules/billing/billing.controller";
+import { BillingService } from "./modules/billing/billing.service";
+import { ProcessedEventRepository } from "./modules/billing/processed-event.repository";
 import { GithubApiClient } from "./modules/github/github-api.client";
 import { GithubController } from "./modules/github/github.controller";
 import { GithubService } from "./modules/github/github.service";
@@ -75,6 +79,17 @@ const repoService = new RepoService(
 );
 
 export const repoController = new RepoController(repoService);
+
+const processedEventRepository = new ProcessedEventRepository();
+const billingService = new BillingService(
+  installationRepository,
+  userRepository,
+  processedEventRepository,
+  repoService,
+  stripeClient
+);
+
+export const billingController = new BillingController(billingService);
 
 const reviewIssueRepository = new ReviewIssueRepository();
 const diffService = new DiffService();
