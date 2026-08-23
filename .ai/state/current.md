@@ -2,23 +2,27 @@
 > Update on every task that changes code. Never leave stale.
 
 ## Active task
-Backend Step 6 (Billing module) complete — all 7 backend plan steps except Step 7 (Deploy) are
-now done. Frontend Step 1 (Foundation) complete; frontend Step 2 (Auth screens) not started.
+Backend Step 7 (Deploy) in progress on `feat/billing-module`: local-tooling pieces done
+(Dockerfiles for api/web, docker-compose with all 4 services, `GET /health`) — real AWS
+provisioning still open, deliberately out of scope for this session (needs separate
+access/authorization). Frontend Step 1 (Foundation) complete; frontend Step 2 (Auth screens)
+not started.
 
 ## Active plan step
-`plans/backend.md` → Step 6: Billing module [ complete ] → Step 7: Deploy [ not-started ]
+`plans/backend.md` → Step 7: Deploy [ in-progress ] — Dockerfiles/compose/health done, AWS
+EC2/RDS/ElastiCache + Secrets Manager + prod webhook URL still open
 `plans/frontend.md` → Step 1: Foundation [ complete ] → Step 2: Auth screens [ not-started ]
 
 ## Last updated
-2026-08-17
+2026-08-23
 
 ## Next action
-Backend's remaining plan step is Step 7 (Deploy) — Dockerfile, docker-compose.yml, AWS
-EC2/RDS/ElastiCache, GitHub App webhook URL → production domain, env vars from AWS Secrets
-Manager, `GET /health`. This is normally the last step (after the frontend catches up), so the
-higher-value next action is `plans/frontend.md` Step 2 (Auth screens) or Step 3 (Install flow)
-— the backend API surface is now fully complete (`/auth/*`, `/github/*`, `/repos/*`,
-`/reviews/*`, `/billing/*`), including real billing/checkout data for Step 3's dashboard.
+Frontend Step 2 (Auth screens) is still the highest-value next step — the backend API surface
+has been complete since Step 6 (`/auth/*`, `/github/*`, `/repos/*`, `/reviews/*`, `/billing/*`),
+and Step 7's remaining AWS work needs real cloud access this session doesn't have. Local dev is
+now fully containerized (`cd apps/api && docker compose up -d --build` brings up
+postgres+redis+api+web together) if that's useful for frontend work against a real backend
+instead of `pnpm dev`.
 
 ## Working branch
 Backend work happens on feature branches cut from `Dev`, not directly on `Dev` — Step 6 was
