@@ -1,6 +1,30 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-08-23 (Step 7, partial)
+- Backend Step 7 (Deploy) local-tooling pieces complete, on `feat/billing-module`.
+  `apps/api/Dockerfile` and `apps/web/Dockerfile`: multi-stage `turbo prune @codeiq/<app>
+  --docker` builds (pnpm install of the pruned subset → `pnpm turbo run build` → prod-only
+  install for `api` / Next.js `output: "standalone"` for `web`) → minimal non-root runtime
+  stage. Both built and run-verified for real, not just typechecked: `api` connects to
+  Postgres+Redis over the compose network and `GET /health` returns 200; `web` builds and
+  serves (its only route so far is the framework's own `/404` — no home page yet, expected
+  given frontend Step 2 hasn't started). `apps/api/docker-compose.yml` extended from
+  postgres+redis-only to all four services (`api`/`web` build from the new Dockerfiles; `api`
+  gets `DATABASE_URL`/`REDIS_URL` pointed at compose service hostnames, everything else from
+  `.env` via `env_file`). New `GET /health` route in `app.ts` (outside `/api`, pings Prisma +
+  Redis, 200/503) — unauthenticated, no module scaffolding, since it's infra plumbing, not a
+  domain endpoint.
+  Found and fixed a real production-build bug in the process (dev's `tsx watch` never surfaces
+  it): `packages/db` and `packages/types` had no `build` script and compiled as ESM
+  (inherited from the shared base tsconfig) while `apps/api` compiles CJS — `node dist/server.js`
+  crashed with `prisma` undefined. Both packages now have a `build` script, `main`/`types`
+  pointing at `dist/` instead of `src/`, and a `module`/`moduleResolution: Node16` override
+  matching `apps/api`. Full `pnpm turbo run build typecheck` and `pnpm --filter @codeiq/api
+  test` (274/274) re-verified clean after the fix. See `memory/pitfalls.md` #012.
+  AWS EC2/RDS/ElastiCache, Secrets Manager, and the production webhook URL remain — real cloud
+  provisioning, out of scope without separate access/authorization.
+
 ## 2026-08-17 (Step 6)
 - Backend Step 6 (Billing module) complete, on feature branch `feat/billing-module`. Added
   `stripe` dependency, `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`/`STRIPE_PRICE_ID_PRO`/

@@ -1,6 +1,8 @@
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
+import { prisma } from "./lib/prisma";
+import { redis } from "./lib/redis";
 import { errorMiddleware } from "./middlewares/error.middleware";
 import { router } from "./routes/index";
 
@@ -25,7 +27,23 @@ app.use((req, res, next) => {
   return express.json()(req, res, next);
 });
 
-// GET /health is .ai/plans/backend.md Step 7 (Deploy), not Step 1 — added there.
+// Unauthenticated, outside /api — hit directly by Docker HEALTHCHECK / load balancer probes,
+// not part of the versioned API surface. Checks both dependencies so a broken DB/Redis
+// connection fails the container's health check instead of surfacing as request-time errors.
+app.get("/health", async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    await redis.ping();
+    res.status(200).json({ success: true, message: "OK", data: null });
+  } catch (err) {
+    res.status(503).json({
+      success: false,
+      message: err instanceof Error ? err.message : "Health check failed",
+      data: null,
+    });
+  }
+});
+
 app.use("/api", router);
 
 // Must be registered last — catches errors from every route above it.
