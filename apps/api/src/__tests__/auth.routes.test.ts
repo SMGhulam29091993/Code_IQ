@@ -12,7 +12,6 @@ import { redis } from "../lib/redis";
 vi.mock("@codeiq/db", () => ({
   prisma: {
     user: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
-    refreshToken: { create: vi.fn(), findUnique: vi.fn(), deleteMany: vi.fn() },
     otp: { upsert: vi.fn(), findUnique: vi.fn(), deleteMany: vi.fn() },
   },
   UserStatus: { ACTIVE: "ACTIVE", LOCKED: "LOCKED" },
@@ -60,11 +59,6 @@ function buildUser(overrides: Partial<Record<string, unknown>> = {}) {
 function mockPrisma() {
   return prisma as unknown as {
     user: { findUnique: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
-    refreshToken: {
-      create: ReturnType<typeof vi.fn>;
-      findUnique: ReturnType<typeof vi.fn>;
-      deleteMany: ReturnType<typeof vi.fn>;
-    };
     otp: {
       upsert: ReturnType<typeof vi.fn>;
       findUnique: ReturnType<typeof vi.fn>;
@@ -147,7 +141,6 @@ describe("Auth routes", () => {
       });
       mockPrisma().otp.deleteMany.mockResolvedValueOnce({ count: 1 });
       mockPrisma().user.findUnique.mockResolvedValueOnce(buildUser());
-      mockPrisma().refreshToken.create.mockResolvedValueOnce({});
 
       const res = await request(app)
         .post("/api/auth/verify-otp")
@@ -198,7 +191,6 @@ describe("Auth routes", () => {
       const passwordHash = await bcrypt.hash("hunter2!!", 12);
       mockPrisma().user.findUnique.mockResolvedValueOnce(buildUser({ passwordHash }));
       mockPrisma().user.update.mockResolvedValueOnce({});
-      mockPrisma().refreshToken.create.mockResolvedValueOnce({});
 
       const res = await request(app)
         .post("/api/auth/login")
@@ -226,7 +218,7 @@ describe("Auth routes", () => {
       const refreshToken = jwt.sign({ sub: "user-1" }, process.env.JWT_REFRESH_SECRET!, {
         expiresIn: "7d",
       });
-      mockPrisma().refreshToken.findUnique.mockResolvedValueOnce({ id: "rt-1", userId: "user-1" });
+      mockRedis().get.mockResolvedValueOnce("user-1");
       mockPrisma().user.findUnique.mockResolvedValueOnce(buildUser());
 
       const res = await request(app).post("/api/auth/refresh").send({ refreshToken });
@@ -260,8 +252,8 @@ describe("Auth routes", () => {
         expiresIn: "15m",
       });
       mockPrisma().user.findUnique.mockResolvedValueOnce(buildUser());
-      mockPrisma().refreshToken.findUnique.mockResolvedValueOnce({ id: "rt-1", userId: "user-1" });
-      mockPrisma().refreshToken.deleteMany.mockResolvedValueOnce({ count: 1 });
+      mockRedis().get.mockResolvedValueOnce("user-1");
+      mockRedis().del.mockResolvedValueOnce(1);
 
       const res = await request(app)
         .post("/api/auth/logout")
