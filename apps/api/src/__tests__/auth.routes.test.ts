@@ -264,4 +264,112 @@ describe("Auth routes", () => {
       expect(res.body.message).toBe("Logged out");
     });
   });
+
+  describe("GET /api/auth/me", () => {
+    it("returns 401 without an Authorization header", async () => {
+      const res = await request(app).get("/api/auth/me");
+      expect(res.status).toBe(401);
+    });
+
+    it("returns 200 with the current user's sanitized profile", async () => {
+      const accessToken = jwt.sign({ sub: "user-1" }, process.env.JWT_SECRET!, {
+        expiresIn: "15m",
+      });
+      // authMiddleware and AuthService.getMe both resolve via prisma.user.findUnique.
+      mockPrisma().user.findUnique.mockResolvedValue(buildUser());
+
+      const res = await request(app)
+        .get("/api/auth/me")
+        .set("Authorization", `Bearer ${accessToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.user).toMatchObject({ email: "user@example.com", name: "Ada Lovelace" });
+      expect(res.body.data.user).not.toHaveProperty("passwordHash");
+    });
+  });
+
+  describe("PATCH /api/auth/me", () => {
+    it("returns 200 with the updated name", async () => {
+      const accessToken = jwt.sign({ sub: "user-1" }, process.env.JWT_SECRET!, {
+        expiresIn: "15m",
+      });
+      mockPrisma().user.findUnique.mockResolvedValue(buildUser());
+      mockPrisma().user.update.mockResolvedValueOnce(buildUser({ name: "New Name" }));
+
+      const res = await request(app)
+        .patch("/api/auth/me")
+        .set("Authorization", `Bearer ${accessToken}`)
+        .send({ name: "New Name" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.user.name).toBe("New Name");
+    });
+
+    it("returns 400 for an empty name", async () => {
+      const accessToken = jwt.sign({ sub: "user-1" }, process.env.JWT_SECRET!, {
+        expiresIn: "15m",
+      });
+      mockPrisma().user.findUnique.mockResolvedValue(buildUser());
+
+      const res = await request(app)
+        .patch("/api/auth/me")
+        .set("Authorization", `Bearer ${accessToken}`)
+        .send({ name: "   " });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe("Name is required");
+    });
+  });
+
+  describe("POST /api/auth/change-password", () => {
+    it("returns 200 when current password is correct", async () => {
+      const accessToken = jwt.sign({ sub: "user-1" }, process.env.JWT_SECRET!, {
+        expiresIn: "15m",
+      });
+      const passwordHash = await bcrypt.hash("old-password", 4);
+      mockPrisma().user.findUnique.mockResolvedValue(buildUser({ passwordHash }));
+      mockPrisma().user.update.mockResolvedValueOnce({});
+
+      const res = await request(app)
+        .post("/api/auth/change-password")
+        .set("Authorization", `Bearer ${accessToken}`)
+        .send({ currentPassword: "old-password", newPassword: "new-password-123" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.message).toBe("Password updated");
+    });
+
+    it("returns 401 when current password is incorrect", async () => {
+      const accessToken = jwt.sign({ sub: "user-1" }, process.env.JWT_SECRET!, {
+        expiresIn: "15m",
+      });
+      const passwordHash = await bcrypt.hash("old-password", 4);
+      mockPrisma().user.findUnique.mockResolvedValue(buildUser({ passwordHash }));
+
+      const res = await request(app)
+        .post("/api/auth/change-password")
+        .set("Authorization", `Bearer ${accessToken}`)
+        .send({ currentPassword: "wrong", newPassword: "new-password-123" });
+
+      expect(res.status).toBe(401);
+      expect(res.body.message).toBe("Current password is incorrect");
+    });
+
+    it("returns 400 for a GitHub-only account with no password", async () => {
+      const accessToken = jwt.sign({ sub: "user-1" }, process.env.JWT_SECRET!, {
+        expiresIn: "15m",
+      });
+      mockPrisma().user.findUnique.mockResolvedValue(buildUser({ passwordHash: null }));
+
+      const res = await request(app)
+        .post("/api/auth/change-password")
+        .set("Authorization", `Bearer ${accessToken}`)
+        .send({ currentPassword: "anything", newPassword: "new-password-123" });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe(
+        "This account signs in with GitHub and has no password to change"
+      );
+    });
+  });
 });

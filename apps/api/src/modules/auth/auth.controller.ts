@@ -32,4 +32,19 @@ export class AuthController {
     await this.authService.logout(req.user!.id, req.body);
     res.status(200).json(ok(null, "Logged out"));
   };
+
+  getMe = async (req: Request, res: Response) => {
+    const result = await this.authService.getMe(req.user!.id);
+    res.status(200).json(ok(result));
+  };
+
+  updateProfile = async (req: Request, res: Response) => {
+    const result = await this.authService.updateProfile(req.user!.id, req.body);
+    res.status(200).json(ok(result));
+  };
+
+  changePassword = async (req: Request, res: Response) => {
+    await this.authService.changePassword(req.user!.id, req.body);
+    res.status(200).json(ok(null, "Password updated"));
+  };
 }

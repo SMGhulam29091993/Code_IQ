@@ -90,6 +90,7 @@ describe("GithubService", () => {
       lockEmail: vi.fn(),
       findByGithubId: vi.fn(),
       linkGithubIdentity: vi.fn(),
+      update: vi.fn(),
     };
     githubApiClient = {
       getInstallation: vi.fn(),

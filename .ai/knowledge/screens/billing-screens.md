@@ -119,42 +119,11 @@ describe('InvoicesList', () => {
 
 ---
 
-## Screen: Workspace Settings `/workspace`
+## Screen: Workspace Settings
 
-### Components
-```
-(dashboard)/workspace/
-├── page.tsx
-└── _components/
-    ├── WorkspaceNameForm.tsx     ← edit installation name (display only)
-    ├── MembersList.tsx           ← future: list workspace members (placeholder)
-    └── DangerZone.tsx            ← remove installation
-```
-
-### Acceptance criteria
-- [ ] Shows installation account login (read-only — from GitHub)
-- [ ] Shows plan tier + seat count
-- [ ] "Remove installation" button → calls `DELETE /github/installations/:id`
-- [ ] Confirm modal before deletion ("This will deactivate all repos. Are you sure?")
-- [ ] On delete success → redirect to `/install`
-
-### Edge cases
-| Case | Behaviour |
-|------|-----------|
-| Confirm modal dismissed | No API call, modal closes |
-| Delete fails (403) | Toast error: "You don't have permission to remove this installation." |
-| Delete succeeds | Redirect to `/install` + clear activeInstallationId from store |
-
-### Test cases
-```typescript
-describe('WorkspacePage', () => {
-  it('renders installation account login')
-  it('renders plan tier and seat count')
-  it('shows confirm modal before deletion')
-  it('calls DELETE /github/installations/:id after confirmation')
-  it('redirects to /install on successful deletion')
-  it('clears activeInstallationId from store on deletion')
-  it('does not call API when confirm modal is dismissed')
-  it('shows error toast on 403')
-})
-```
+> **Moved 2026-08-23.** This screen shipped as the "Workspace" tab of `/account`, not its own
+> `/workspace` route — see `knowledge/screens/account-screens.md` for the current spec
+> (component breakdown, AC, edge cases, test cases). Also fixed there: the redirect-on-delete
+> target was `/install`, a placeholder route name from before Onboarding existed; it's
+> `/onboarding` now. This section is kept only so old links/history into this doc still land
+> somewhere — do not add new detail here.

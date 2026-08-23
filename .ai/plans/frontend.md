@@ -151,7 +151,26 @@
   shipped in one session, screen by screen, each committed separately. 77/77 frontend tests,
   296/296 backend tests, clean typecheck/lint/build on both apps.
 
-## Step 8 — Polish [ not-started ]
+## Step 8 — Account & Workspace settings [ not-started ]
+> Not part of the mockup — added per explicit user request for "account management" after
+> Step 7. Covers both meanings raised: personal profile (new) and workspace/installation
+> settings (previously spec'd as `/workspace` in `billing-screens.md`, never built — see
+> `knowledge/screens/account-screens.md`, which now owns both as tabs of one `/account` route).
+- [ ] Backend first: `GET /auth/me`, `PATCH /auth/me`, `POST /auth/change-password`
+  (`knowledge/domains/auth.md`) — nothing exposed a user's own profile before this
+- [ ] `(dashboard)/account/page.tsx`: 2 tabs (Profile / Workspace), same tabbed-page pattern as
+  Repo Detail
+- [ ] `components/account/{AccountTabs,ProfileForm,ChangePasswordForm,WorkspacePanel,
+  DangerZone}.tsx`
+- [ ] `ChangePasswordForm` hidden entirely for GitHub-only accounts (`user.githubId` set) —
+  matches the backend's own rejection of that case
+- [ ] Workspace tab reuses `DELETE /github/installations/:id` (already existed, never had a
+  frontend) — redirects to `/onboarding` on delete, not the old placeholder `/install`
+- [ ] `components/layout/Sidebar.tsx`: add "Account" nav item
+- Domain: `knowledge/domains/auth.md`, `knowledge/domains/github-app.md`
+- Screen: `knowledge/screens/account-screens.md`
+
+## Step 9 — Polish [ not-started ]
 - [ ] Framer Motion page transitions
 - [ ] Keyboard navigation audit
 - [ ] axe-core accessibility pass on every page

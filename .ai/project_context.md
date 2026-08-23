@@ -50,8 +50,10 @@ Turborepo monorepo
 | Screens       | File                                      |
 |---------------|-------------------------------------------|
 | Auth screens  | `knowledge/screens/auth-screens.md`       |
+| Onboarding    | `knowledge/screens/onboarding-screens.md` |
 | Dashboard + Repos + Reviews | `knowledge/screens/dashboard-screens.md` |
-| Billing + Workspace | `knowledge/screens/billing-screens.md` |
+| Billing       | `knowledge/screens/billing-screens.md` |
+| Account + Workspace | `knowledge/screens/account-screens.md` |
 
 ## Technical knowledge
 | Platform  | File                                                        |

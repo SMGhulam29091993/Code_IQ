@@ -1,6 +1,29 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-08-23 (Frontend Step 8 — Account & Workspace settings)
+- User asked "you forgot to include the account management of user" after Step 7 — not part of
+  the mockup, which has no account/settings screen at all. Clarified scope via AskUserQuestion:
+  user meant **both** personal profile management (nothing existed — no docs, no API) and
+  workspace/installation settings (already spec'd as `/workspace` in `billing-screens.md`,
+  backend already existed via `DELETE /github/installations/:id`, just never built).
+  Built both as two tabs of one `/account` route (`knowledge/screens/account-screens.md`, new),
+  same tabbed-page pattern as Repo Detail — not two separate top-level sidebar entries.
+  **Backend**: `GET /auth/me`, `PATCH /auth/me` (name only — email is deliberately not
+  editable, documented as a real gap tied to the OTP-verification identity flow),
+  `POST /auth/change-password` (rejects GitHub-only accounts with no `passwordHash`, doesn't
+  revoke other sessions — also documented gaps, not silently done). 298 → 311 `@codeiq/api`
+  tests.
+  **Frontend**: `ProfileForm`, `ChangePasswordForm` (hidden entirely for GitHub-only accounts),
+  `WorkspacePanel`, `DangerZone` (inline confirm dialog, not a shared Modal — only caller so
+  far). Fixed `billing-screens.md`'s stale `/install` redirect target to the real `/onboarding`
+  route along the way. 77 → 86 `@codeiq/web` tests.
+  **Live browser verification** (same seeded Postgres data from Step 3–7's session): edited the
+  profile name, tried a change-password with a wrong current password (got the correct inline
+  error), then the correct one (form cleared, success message), viewed the Workspace tab, and
+  opened + cancelled the danger-zone confirm dialog — all worked correctly on the first pass,
+  zero console/page errors. No bugs found this round.
+
 ## 2026-08-23 (Frontend Steps 3–7 — CodeIQ Dashboard mockup implementation)
 - Imported the Claude Design mockup `CodeIQ Dashboard.dc.html` (+ `support.js`) via the
   `claude_design` MCP and implemented it end to end in one session, committing after each part.

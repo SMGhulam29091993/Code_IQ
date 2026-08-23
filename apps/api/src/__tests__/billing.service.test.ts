@@ -74,6 +74,7 @@ describe("BillingService", () => {
       lockEmail: vi.fn(),
       findByGithubId: vi.fn(),
       linkGithubIdentity: vi.fn(),
+      update: vi.fn(),
     };
     processedEventRepo = { exists: vi.fn().mockResolvedValue(false), create: vi.fn() };
     repoService = {

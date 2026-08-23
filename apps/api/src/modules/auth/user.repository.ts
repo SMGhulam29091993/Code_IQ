@@ -32,4 +32,8 @@ export class UserRepository implements IUserRepository {
   ) {
     return prisma.user.update({ where: { id: userId }, data });
   }
+
+  update(id: string, data: Partial<{ name: string; passwordHash: string }>) {
+    return prisma.user.update({ where: { id }, data });
+  }
 }

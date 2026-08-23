@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: "/reviews", label: "Reviews" },
   { href: "/billing", label: "Billing" },
   { href: "/onboarding", label: "Onboarding" },
+  { href: "/account", label: "Account" },
 ];
 
 export const Sidebar: FC = () => {

@@ -3,6 +3,7 @@
 // module is built; using Record<string, unknown> here would be a lie about what's
 // actually enforced, so callers pass the literal shape until packages/types grows one.
 export const queryKeys = {
+  me: ["me"] as const,
   installations: ["installations"] as const,
   repos: (installationId?: string) => ["repos", installationId] as const,
   repo: (repoId: string) => ["repos", repoId] as const,

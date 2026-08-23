@@ -371,6 +371,127 @@ was written but never actually read (expiry was always enforced by the JWT itsel
 
 ---
 
+### GET /auth/me
+**Purpose:** Return the current user's profile. New 2026-08-23 — added to back the Account
+screen (`knowledge/screens/account-screens.md`); nothing previously exposed a user's own profile
+outside the tokens issued at login/register.
+**Auth:** JWT
+
+**Acceptance criteria:**
+- [ ] Returns the same `SanitizedUser` shape already used elsewhere (never `passwordHash`)
+
+**Implementation pseudocode:**
+```
+getMe(userId):
+  user = userRepo.findById(userId)
+  if !user → throw UnauthorizedError("User not found")   // shouldn't happen — authMiddleware already checked
+  return ok({ user: sanitize(user) })
+```
+
+**Unit test cases:**
+```typescript
+describe('AuthService.getMe', () => {
+  it('returns the current user\'s sanitized profile')
+})
+```
+
+---
+
+### PATCH /auth/me
+**Purpose:** Update the current user's display name.
+**Auth:** JWT
+
+**Request body:**
+```typescript
+{ name: string }
+```
+
+**Acceptance criteria:**
+- [ ] Updates `users.name` only — **email is not editable here.** Email is the login identifier
+  and is tied to the OTP-verification flow (`register`/`verify-otp`); changing it would need its
+  own re-verification flow (send a confirmation to the new address before it takes effect),
+  which isn't designed yet. Flagged as a real gap, not silently supported.
+- [ ] Returns the updated `SanitizedUser`
+
+**Edge cases:**
+| Case | Expected behaviour | Status |
+|------|--------------------|--------|
+| Name empty or whitespace-only | 400 `"Name is required"` (same message as register) | |
+| Name > 100 chars | 400 `"Name too long"` | |
+
+**Implementation pseudocode:**
+```
+updateProfile(userId, body):
+  validate body with UpdateProfileSchema
+  user = userRepo.update(userId, { name: body.name.trim() })
+  return ok({ user: sanitize(user) })
+```
+
+**Unit test cases:**
+```typescript
+describe('AuthService.updateProfile', () => {
+  it('updates the user\'s name')
+  it('trims whitespace from the name before storing')
+  it('returns the updated sanitized user')
+})
+```
+
+---
+
+### POST /auth/change-password
+**Purpose:** Change the current user's password.
+**Auth:** JWT
+
+**Request body:**
+```typescript
+{ currentPassword: string; newPassword: string }
+```
+
+**Acceptance criteria:**
+- [ ] Verifies `currentPassword` against `users.passwordHash` with `bcrypt.compare` before
+  accepting the change
+- [ ] Rejects the change entirely when the account has no `passwordHash` (GitHub-only account,
+  linked via `GET /github/oauth/callback` — see `knowledge/domains/github-app.md`'s implementation
+  notes; those users have no password to change and no UI for this should even be shown, but the
+  API rejects it either way as a real boundary, not just a frontend nicety)
+- [ ] Hashes `newPassword` the same way `register` does (bcrypt, cost 12)
+- [ ] Does **not** revoke existing refresh tokens/sessions — logging out other devices after a
+  password change isn't designed yet; flagged, not silently done
+
+**Edge cases:**
+| Case | Expected behaviour | Status |
+|------|--------------------|--------|
+| Account has no passwordHash (GitHub-only) | 400 `"This account signs in with GitHub and has no password to change"` | |
+| `currentPassword` incorrect | 401 `"Current password is incorrect"` | |
+| `newPassword` < 8 chars | 400 `"Password must be at least 8 characters"` | |
+| `newPassword` > 128 chars | 400 `"Password too long"` | |
+| `newPassword` same as `currentPassword` | Allowed — no special-cased rejection (not worth the extra hash comparison for a case with no real security value) | |
+
+**Implementation pseudocode:**
+```
+changePassword(userId, body):
+  validate body with ChangePasswordSchema
+  user = userRepo.findById(userId)
+  if !user.passwordHash → throw BadRequestError("This account signs in with GitHub and has no password to change")
+  match = await bcrypt.compare(body.currentPassword, user.passwordHash)
+  if !match → throw UnauthorizedError("Current password is incorrect")
+  newHash = await bcrypt.hash(body.newPassword, 12)
+  userRepo.update(userId, { passwordHash: newHash })
+  return ok(null, "Password updated")
+```
+
+**Unit test cases:**
+```typescript
+describe('AuthService.changePassword', () => {
+  it('updates the password hash when current password is correct')
+  it('throws UnauthorizedError when current password is incorrect')
+  it('throws BadRequestError for a GitHub-only account with no passwordHash')
+  it('hashes the new password with the same bcrypt cost as register')
+})
+```
+
+---
+
 ### GET /github/oauth/url
 **Purpose:** Generate the GitHub OAuth authorization URL for identity linking.
 **Auth:** JWT

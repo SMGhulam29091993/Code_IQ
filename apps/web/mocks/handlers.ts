@@ -41,6 +41,18 @@ export const handlers: HttpHandler[] = [
       data: { token: "mock-access-token", refreshToken: "mock-refresh-token", user: mockUser },
     })
   ),
+  http.get("/api/auth/me", () =>
+    HttpResponse.json({ success: true, message: "Success", data: { user: mockUser } })
+  ),
+  http.patch("/api/auth/me", () =>
+    HttpResponse.json({ success: true, message: "Success", data: { user: mockUser } })
+  ),
+  http.post("/api/auth/change-password", () =>
+    HttpResponse.json({ success: true, message: "Password updated", data: null })
+  ),
+  http.delete("/api/github/installations/:installationId", () =>
+    HttpResponse.json({ success: true, message: "Installation removed", data: null })
+  ),
 
   http.get("/api/github/installations", () =>
     HttpResponse.json({ success: true, message: "Success", data: { installations: [mockInstallation] } })
