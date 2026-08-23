@@ -86,7 +86,9 @@ const billingService = new BillingService(
   userRepository,
   processedEventRepository,
   repoService,
-  stripeClient
+  stripeClient,
+  githubApiClient,
+  reviewRepository
 );
 
 export const billingController = new BillingController(billingService);

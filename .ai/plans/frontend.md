@@ -59,44 +59,61 @@
   what got built. `knowledge/screens/auth-screens.md` and
   `knowledge/technical/frontend/hooks-and-utils.md` updated (see notes above).
 
-## Step 3 — Install flow [ not-started ]
-- [ ] `(dashboard)/install/page.tsx`: "Install GitHub App" CTA → redirect to GitHub
-- [ ] GitHub OAuth callback handler
-- [ ] Installation saved via `POST /github/install`
-- Domain: `knowledge/domains/github-app.md`
+> Steps 3–7 rewritten 2026-08-23 against the Claude Design mockup `CodeIQ Dashboard.dc.html` —
+> screen set, IA (tabs vs. separate routes), and layouts below now match it; see
+> `knowledge/screens/{onboarding,dashboard,billing}-screens.md` for full AC/pseudocode/tests per
+> screen and `knowledge/domains/billing.md` for the 3 new endpoints Step 7 now depends on.
+
+## Step 3 — Onboarding [ not-started ]
+- [ ] `(dashboard)/onboarding/page.tsx`: 3-step flow (Install App → Choose repos → Open a PR)
+- [ ] `components/onboarding/{OnboardingSteps,InstallStep,ChooseReposStep,OpenPrStep}.tsx`
+- [ ] Installation saved via existing `POST /github/install`; repo activation via existing
+  `POST /repos/:id/activate`
+- Domain: `knowledge/domains/github-app.md`, `knowledge/domains/repos.md`
+- Screen: `knowledge/screens/onboarding-screens.md`
 
 ## Step 4 — Dashboard overview [ not-started ]
 - [ ] `(dashboard)/overview/page.tsx`
-- [ ] `components/dashboard/StatsGrid.tsx`: 4 stat cards (meetings, hours, action items, queries)
-- [ ] `components/dashboard/IssuesTrendChart.tsx`: recharts LineChart
-- [ ] Recent reviews list (last 5)
-- [ ] Pending action items widget
-- [ ] loading.tsx + error.tsx + empty state
+- [ ] `components/dashboard/StatsGrid.tsx`: 4 stat cards (Reviews this week, Issues found, Median
+  review, Failed reviews — from `GET /reviews/stats`)
+- [ ] `components/dashboard/RecentReviewsList.tsx`: last 5 reviews
+- [ ] `components/dashboard/IssuesByCategory.tsx`: category breakdown bars
+- [ ] loading.tsx + error.tsx + empty state (each section fails/loads independently)
+- Domain: `knowledge/domains/review.md`
+- Screen: `knowledge/screens/dashboard-screens.md` ("Screen: Overview")
+- Note: mockup's "editorial" overview treatment is documented but not built — "standard" only
 
 ## Step 5 — Repos screens [ not-started ]
 - [ ] `(dashboard)/repos/page.tsx`: repo list with activate/deactivate toggles
 - [ ] `components/repos/RepoCard.tsx`
-- [ ] `(dashboard)/repos/[repoId]/page.tsx`: repo detail + review history
-- [ ] `(dashboard)/repos/[repoId]/settings/page.tsx`: per-repo config form
+- [ ] `(dashboard)/repos/[repoId]/page.tsx`: **one page, 3 tabs** (Configuration/Reviews/
+  Insights) — not the old two-route (`/settings`) design
+- [ ] `components/repos/{RepoDetailTabs,RepoConfigPanel,RepoReviewsPanel,RepoInsightsPanel}.tsx`
 - [ ] All edge cases: loading, error, empty, plan limit warning
-- Domain: `knowledge/domains/repos.md`
+- Domain: `knowledge/domains/repos.md` (includes new `GET /repos/:repoId`)
+- Screen: `knowledge/screens/dashboard-screens.md` ("Screen: Repo Detail")
 
 ## Step 6 — Reviews screens [ not-started ]
 - [ ] `(dashboard)/reviews/page.tsx`: full review list with filters + pagination
 - [ ] `components/reviews/ReviewCard.tsx`
-- [ ] `(dashboard)/reviews/[reviewId]/page.tsx`: review detail
-- [ ] `components/reviews/DiffViewer.tsx`: syntax highlighted
-- [ ] `components/reviews/CommentThread.tsx`: issues grouped by file
+- [ ] `(dashboard)/reviews/[reviewId]/page.tsx`: **Split layout** (file rail + issue panel) —
+  Stream layout documented but not built this pass
+- [ ] `components/reviews/{FileRail,IssueCard,DiffSnippet,ProcessingState}.tsx`
 - [ ] `components/reviews/SeverityBadge.tsx`, `CategoryBadge.tsx`
 - [ ] Retry button for FAILED reviews
 - [ ] Polling for PENDING/RUNNING reviews (`refetchInterval: 5000`)
+- [ ] Dismiss button rendered inert (no API — schema gap, see `knowledge/domains/review.md`)
 - Domain: `knowledge/domains/review.md`
+- Screen: `knowledge/screens/dashboard-screens.md` ("Screen: Review Detail")
 
 ## Step 7 — Billing screen [ not-started ]
-- [ ] `(dashboard)/billing/page.tsx`: plan cards, current plan banner, seat manager
-- [ ] Checkout redirect flow
-- [ ] Billing portal redirect
+- [ ] Backend first: `GET /billing/{subscription,seats,invoices}` (`knowledge/domains/
+  billing.md`) — Billing screen has no real data to render without these
+- [ ] `(dashboard)/billing/page.tsx`: `PlanCards`, `SeatsPanel`, `NextInvoiceCard`, `InvoicesList`
+- [ ] Checkout redirect flow (existing `POST /billing/checkout`)
+- [ ] Billing portal redirect (existing `POST /billing/portal`)
 - Domain: `knowledge/domains/billing.md`
+- Screen: `knowledge/screens/billing-screens.md`
 
 ## Step 8 — Polish [ not-started ]
 - [ ] Framer Motion page transitions

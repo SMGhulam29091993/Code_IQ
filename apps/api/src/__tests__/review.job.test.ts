@@ -93,6 +93,7 @@ describe("ReviewJobProcessor.process", () => {
       countIssuesBySeverityForUser: vi.fn(),
       countIssuesByCategoryForUser: vi.fn(),
       countIssuesByDayForUser: vi.fn(),
+      countReviewsByAuthorForInstallation: vi.fn(),
     };
     reviewIssueRepo = { createMany: vi.fn() };
     installationRepo = {

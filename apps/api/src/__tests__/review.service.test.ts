@@ -70,6 +70,7 @@ describe("ReviewService", () => {
       countIssuesBySeverityForUser: vi.fn(),
       countIssuesByCategoryForUser: vi.fn(),
       countIssuesByDayForUser: vi.fn(),
+      countReviewsByAuthorForInstallation: vi.fn(),
     };
     repoRepo = {
       findManyForUser: vi.fn(),

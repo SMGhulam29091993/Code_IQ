@@ -1,5 +1,8 @@
 # Frontend Design System
-> Token reference for CodeIQ. Source: Figma library (link TBD).
+> Token reference for CodeIQ. Source: Claude Design mockup `CodeIQ Dashboard.dc.html` (imported
+> 2026-08-23) — confirmed the tokens below already matched `tailwind.config.ts` exactly (no
+> changes needed there); the three rules and diff-line tokens after "Border radius" are new,
+> carried verbatim from the mockup's own "Design notes" screen.
 
 ## Color tokens (Tailwind custom config)
 ```js
@@ -59,6 +62,23 @@ Tailwind default (4px base). Use `gap-*`, `p-*`, `m-*` from Tailwind only.
 - Badges/tags: `rounded-full`
 - Inputs: `rounded-lg`
 
+## Cross-cutting design rules
+1. **Mono for code identity.** Repo names, PR numbers, and SHAs render in `DM Mono`, not the body
+   font — separates identifiers from prose for a scanning developer, at the cost of denser tables
+   than a typical SaaS dashboard. Applies to: repo full names, `#482`-style PR numbers, git SHAs,
+   file paths, glob patterns.
+2. **Severity is colour plus a word, never colour alone.** Every severity chip/pill carries both
+   its colour token and a text label (and usually a count) — a colour-only dot fails colour-blind
+   readers and greyscale printing.
+3. **Diff-snippet line tokens** (used by `DiffSnippet`/review-issue diff blocks):
+```js
+diffLine: {
+  context: { bg: 'transparent',            fg: 'text2' },       // "#0D0D13" bg in the mockup, text2 fg
+  added:   { bg: 'rgba(52,211,153,0.09)',  fg: '#7EE9BE' },
+  removed: { bg: 'rgba(248,113,113,0.09)', fg: '#F8A0A0' },
+}
+```
+
 ## Component inventory (shadcn/ui primitives)
 | Component | Import |
 |-----------|--------|
@@ -84,3 +104,8 @@ Tailwind default (4px base). Use `gap-*`, `p-*`, `m-*` from Tailwind only.
 | Sidebar | `components/layout/Sidebar.tsx` | dashboard nav |
 | ErrorBanner | `components/ui/ErrorBanner.tsx` | page-level API error |
 | LoadingSkeleton | `components/ui/LoadingSkeleton.tsx` | content placeholder |
+| FileRail | `components/reviews/FileRail.tsx` | review-detail file list w/ severity tick |
+| DiffSnippet | `components/reviews/DiffSnippet.tsx` | unified-diff lines (context/added/removed) |
+| IssueCard | `components/reviews/IssueCard.tsx` | severity/category header + message + diff + suggestion |
+| PlanCards | `components/billing/PlanCards.tsx` | 3-tier plan comparison, current-plan highlight |
+| SeatsPanel | `components/billing/SeatsPanel.tsx` | GitHub org members + role + PR count |

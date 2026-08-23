@@ -39,6 +39,10 @@ export interface ActivateRepoResult {
   repo: SanitizedRepo;
 }
 
+export interface GetRepoResult {
+  repo: SanitizedRepo;
+}
+
 export interface GetConfigResult {
   config: SanitizedRepoConfig;
 }
@@ -100,6 +104,9 @@ export interface IRepoConfigRepository {
 
 export interface IRepoService {
   listRepos(userId: string, filters: ListReposFilters): Promise<ListReposResult>;
+  // New 2026-08-23 — .ai/knowledge/domains/repos.md "GET /repos/:repoId". Needed now that Repo
+  // Detail is one tabbed page rather than a list-filter (knowledge/screens/dashboard-screens.md).
+  getRepo(userId: string, repoId: string): Promise<GetRepoResult>;
   activateRepo(userId: string, repoId: string): Promise<ActivateRepoResult>;
   deactivateRepo(userId: string, repoId: string): Promise<ActivateRepoResult>;
   getConfig(userId: string, repoId: string): Promise<GetConfigResult>;

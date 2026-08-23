@@ -97,6 +97,7 @@ describe("RepoService", () => {
       countIssuesBySeverityForUser: vi.fn().mockResolvedValue({}),
       countIssuesByCategoryForUser: vi.fn().mockResolvedValue({}),
       countIssuesByDayForUser: vi.fn().mockResolvedValue([]),
+      countReviewsByAuthorForInstallation: vi.fn().mockResolvedValue({}),
     };
 
     service = new RepoService(repoRepo, repoConfigRepo, installationRepo, reviewRepo);
@@ -148,6 +149,32 @@ describe("RepoService", () => {
       const result = await service.listRepos("user-1", {});
 
       expect(result.repos).toEqual([]);
+    });
+  });
+
+  describe("getRepo", () => {
+    it("returns the repo for an authorized user", async () => {
+      vi.mocked(repoRepo.findByIdForUser).mockResolvedValue(buildRepo());
+      vi.mocked(repoRepo.countReviews).mockResolvedValue(5);
+
+      const result = await service.getRepo("user-1", "repo-1");
+
+      expect(result.repo.id).toBe("repo-1");
+      expect(result.repo.reviewCount).toBe(5);
+    });
+
+    it("throws NotFoundError for unknown repoId", async () => {
+      vi.mocked(repoRepo.findByIdForUser).mockResolvedValue(null);
+
+      await expect(service.getRepo("user-1", "missing")).rejects.toThrow(NotFoundError);
+    });
+
+    it("throws ForbiddenError when repo belongs to another user", async () => {
+      vi.mocked(repoRepo.findByIdForUser).mockResolvedValue(
+        buildRepo({ installation: { userId: "someone-else", planTier: "FREE" } })
+      );
+
+      await expect(service.getRepo("user-1", "repo-1")).rejects.toThrow(ForbiddenError);
     });
   });
 

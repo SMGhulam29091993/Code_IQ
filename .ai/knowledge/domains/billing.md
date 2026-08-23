@@ -1,5 +1,10 @@
 # Domain: Billing
 > Covers Stripe plan management, seat-based pricing, and webhook handling.
+> `GET /billing/subscription`, `GET /billing/seats`, and `GET /billing/invoices` below are new —
+> added 2026-08-23 to back the Billing screen's real layout, source: `knowledge/screens/
+> billing-screens.md` (rewritten against the Claude Design mockup `CodeIQ Dashboard.dc.html`).
+> Nothing before this section existed to answer "what's my current plan/seats/invoices" — only
+> `/billing/{plans,checkout,portal,webhook}` did.
 
 ## Plan definitions
 | Tier  | Price          | Repo limit | Review limit/mo | AI queries |
@@ -99,6 +104,150 @@ describe('BillingService.createCheckout', () => {
 |------|--------------------|-|
 | No Stripe customer ID | 400 `"No active subscription found"` | |
 | Stripe API error | 502 | |
+
+---
+
+### GET /billing/subscription
+**Purpose:** Current plan/seats/next-invoice summary for the Billing screen's header + plan
+card highlighting + next-invoice card.
+**Auth:** JWT
+
+**Acceptance criteria:**
+- [ ] Scoped to the current user's installation (`InstallationRepository.findByUserId`, same
+  "one active installation per user" stance as `createCheckout`/`createPortal` — see
+  Implementation notes below)
+- [ ] Returns 400 when the installation has no `stripeSubId` (FREE tier / never subscribed) —
+  this is what drives the Billing screen's "No subscription yet" empty state, not a 200 with
+  null fields
+- [ ] `nextInvoice` fields come from `stripe.invoices.retrieveUpcoming` (or equivalent), not
+  computed client-side
+- [ ] Never exposes the full Stripe customer/subscription object — only the fields below
+
+**Response shape:**
+```typescript
+{
+  data: {
+    planTier: 'PRO' | 'TEAM';
+    seatCount: number;
+    nextInvoice: { date: string; amount: number } | null;  // null if subscription is canceling
+    paymentMethod: { brand: string; last4: string } | null;
+  }
+}
+```
+
+**Edge cases:**
+| Case | Expected behaviour | Status |
+|------|--------------------|-|
+| Installation has no `stripeSubId` (FREE) | 400 `"No active subscription found"` | |
+| No installation for user | 404 `"Installation not found"` | |
+| Stripe API unavailable | 502 | |
+| Subscription set to cancel at period end | `nextInvoice: null`, `planTier` still reflects current (unchanged) tier | |
+
+**Unit test cases:**
+```typescript
+describe('BillingService.getSubscription', () => {
+  it('returns plan tier, seat count, next invoice and payment method for a subscribed installation')
+  it('throws BadRequestError when installation has no stripeSubId')
+  it('throws NotFoundError when user has no installation')
+  it('returns nextInvoice: null when subscription is set to cancel at period end')
+})
+```
+
+---
+
+### GET /billing/seats
+**Purpose:** Seat list for the Billing screen's Seats panel — GitHub org members joined with
+each member's PR review activity in the current billing period.
+**Auth:** JWT
+
+**Acceptance criteria:**
+- [ ] Fetches org members via the installation's Octokit (`GET /orgs/:org/members`, using the
+  same `IGithubApiClient` narrow-interface pattern as the rest of `modules/github`) — GitHub is
+  the source of truth for who has a seat, **not** a locally-invited list (resolves the mockup's
+  own "Where seats come from" open question in favor of "GitHub org membership", since that's
+  the only real signal `Installation`/`User` already models)
+- [ ] For each member, counts `Review` rows in the current billing period (Stripe subscription's
+  `current_period_start` → now) where `prAuthor` matches the member's GitHub login
+- [ ] Returns role as reported by the GitHub org-members API — **`'admin' | 'member'` only**, not
+  the mockup's `owner`/`admin`/`member` trio. GitHub's org-membership API exposes exactly those
+  two roles (fetched via two `role`-filtered `listMembers` calls); "owner" isn't a distinct role
+  it returns, so the frontend maps `admin` → the mockup's "owner" styling for the installing
+  user's own login (if it needs that visual distinction) rather than this endpoint inventing a
+  third role GitHub doesn't have
+- [ ] Scoped to the current user's installation
+
+**Response shape:**
+```typescript
+{
+  data: {
+    seats: Array<{
+      login: string;
+      role: 'admin' | 'member';
+      prsReviewed: number;   // 0 → frontend renders "no reviews this period"
+    }>;
+  }
+}
+```
+
+**Edge cases:**
+| Case | Expected behaviour | Status |
+|------|--------------------|-|
+| Installation account type is 'User' (not 'Organization') | 400 `"Seats are only available for organization installations"` | |
+| GitHub API unavailable | 502 (frontend's SeatsPanel shows its own error state, not a full-page failure) | |
+| Member has 0 reviews in the period | `prsReviewed: 0` | |
+| No installation for user | 404 | |
+
+**Unit test cases:**
+```typescript
+describe('BillingService.getSeats', () => {
+  it('returns org members from the GitHub API with role and PR review count')
+  it('counts reviews only within the current billing period')
+  it('returns prsReviewed: 0 for members with no reviews')
+  it('throws BadRequestError for a non-organization installation')
+  it('propagates a 502 when the GitHub API call fails')
+})
+```
+
+---
+
+### GET /billing/invoices
+**Purpose:** Paginated invoice history for the Billing screen's Invoices list.
+**Auth:** JWT
+
+**Query params:** `{ limit?: number }`  // default 12, max 50 — Stripe cursor pagination via `starting_after` is a future enhancement, not needed at this list size
+
+**Acceptance criteria:**
+- [ ] Proxies `stripe.invoices.list({ customer, limit })` for the installation's
+  `stripeCustomerId`
+- [ ] Returns date, amount, status, and a hosted PDF URL per invoice — never the raw Stripe
+  invoice object
+- [ ] Scoped to the current user's installation
+
+**Response shape:**
+```typescript
+{
+  data: {
+    invoices: Array<{ date: string; amount: number; status: string; pdfUrl: string }>;
+  }
+}
+```
+
+**Edge cases:**
+| Case | Expected behaviour | Status |
+|------|--------------------|-|
+| Installation has no `stripeCustomerId` | 400 `"No billing history found"` | |
+| Stripe API unavailable | 502 | |
+| No invoices yet (subscribed same day) | `{ invoices: [] }` | |
+
+**Unit test cases:**
+```typescript
+describe('BillingService.getInvoices', () => {
+  it('returns invoices for the installation\'s Stripe customer')
+  it('respects the limit param up to 50')
+  it('throws BadRequestError when installation has no stripeCustomerId')
+  it('returns empty array when customer has no invoices yet')
+})
+```
 
 ---
 

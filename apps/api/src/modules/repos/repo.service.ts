@@ -3,6 +3,7 @@ import { DEFAULT_REPO_CONFIG } from "./repo.types";
 import type {
   ActivateRepoResult,
   GetConfigResult,
+  GetRepoResult,
   IRepoConfigRepository,
   IRepoRepository,
   IRepoService,
@@ -48,6 +49,12 @@ export class RepoService implements IRepoService {
 
     const rows = await this.repoRepo.findManyForUser(userId, filters);
     return { repos: rows.map((row) => sanitizeRepo(row, row.reviewCount)) };
+  }
+
+  async getRepo(userId: string, repoId: string): Promise<GetRepoResult> {
+    const repo = await this.findOwnedRepo(userId, repoId);
+    const reviewCount = await this.repoRepo.countReviews(repoId);
+    return { repo: sanitizeRepo(repo, reviewCount) };
   }
 
   async activateRepo(userId: string, repoId: string): Promise<ActivateRepoResult> {

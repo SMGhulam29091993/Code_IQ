@@ -1,6 +1,12 @@
 # Screens: Dashboard (Overview, Repos, Reviews)
 > Acceptance criteria, component breakdown, pseudocode, edge cases, test cases.
 > API contract: `knowledge/domains/review.md`, `knowledge/domains/repos.md`
+> Source: Claude Design mockup `CodeIQ Dashboard.dc.html` (imported 2026-08-23) — the first
+> concrete visual/interaction spec for these screens. The Repo Detail and Review Detail sections
+> below were rewritten against it (see the two notes inline); Overview and Reviews List already
+> matched. The mockup's own "Design notes" screen states its assumptions and three open product
+> questions verbatim — carried into this doc where they land (Insights tab, Dismiss button,
+> seats source) rather than silently resolved.
 
 ---
 
@@ -197,68 +203,91 @@ describe('RepoCard toggle', () => {
 
 ## Screen: Repo Detail `/repos/[repoId]`
 
+> **Rewritten against the mockup (2026-08-23).** Previously documented as two routes
+> (`/repos/[repoId]` for stats/history + `/repos/[repoId]/settings` for config). The mockup
+> specifies **one route, three tabs** (`repoTabs`: Reviews / Configuration / Insights) — no
+> separate settings page. This doc now follows the mockup; the old two-route split is gone.
+
 ### Components
 ```
 (dashboard)/repos/[repoId]/
-├── page.tsx
+├── page.tsx                     ← server component shell, reads ?tab= for initial tab
 ├── loading.tsx
 ├── error.tsx
 └── _components/
-    ├── RepoHeader.tsx         ← name, language, active status, last reviewed
-    ├── RepoStatsRow.tsx       ← total reviews, total issues, breakdown
-    └── RepoReviewHistory.tsx  ← paginated list of past reviews for this repo
+    ├── RepoDetailTabs.tsx        ← owns active tab (`config` default), renders one of the below
+    ├── RepoConfigPanel.tsx       ← severity radio + category pills + ignore patterns + switches + save
+    ├── RepoReviewsPanel.tsx      ← reviews scoped to this repo (reuses ReviewCard from Reviews screen)
+    └── RepoInsightsPanel.tsx     ← 3 metric cards, see "Insights tab" note below
 ```
 
-### Acceptance criteria
-- [ ] Fetches repo via `GET /repos` filtered by repoId (or a future `GET /repos/:id`)
-- [ ] Fetches stats via `GET /repos/:repoId/stats`
-- [ ] Fetches reviews via `GET /reviews?repoId=:repoId`
-- [ ] Issue trend chart (last 30 days) using recharts
-- [ ] "Settings" button → `/repos/[repoId]/settings`
+Header (shared with every dashboard screen's `<main>` header): breadcrumb = repo full name,
+title = "Repository settings", no header CTA for this screen.
+
+### Acceptance criteria — tabs shell
+- [ ] Fetches the repo via `GET /repos/:repoId` (see `knowledge/domains/repos.md` — new endpoint)
+- [ ] 3 tabs: Reviews / Configuration / Insights. Default tab on load: Configuration
+- [ ] Tab selection reflected in URL (`?tab=reviews`) so links are shareable
 - [ ] Handles 403 (repo belongs to another user) → redirect to `/repos`
+- [ ] Handles 404 (repoId not found) → Next.js `not-found.tsx`
 
-### Test cases
-```typescript
-describe('RepoDetailPage', () => {
-  it('renders repo name and language')
-  it('renders stats from /repos/:id/stats')
-  it('renders review history list')
-  it('navigates to settings page')
-  it('shows skeleton while loading')
-  it('redirects to /repos on 403 response')
-  it('renders trend chart with 30-day data')
-})
-```
-
----
-
-## Screen: Repo Settings `/repos/[repoId]/settings`
-
-### Components
-```
-(dashboard)/repos/[repoId]/settings/
-├── page.tsx
-└── _components/
-    └── RepoConfigForm.tsx     ← loads config, shows form, saves on submit
-```
-
-### Acceptance criteria
+### Acceptance criteria — Configuration tab (`RepoConfigPanel`)
 - [ ] Loads current config via `GET /repos/:repoId/config`
-- [ ] Form fields:
-  - Severity threshold: radio group (Critical only / Warning+ / All)
-  - Enabled categories: multi-checkbox (bug, security, style, performance, logic)
-  - Ignore patterns: tag input (add/remove glob strings)
-  - Review on draft: toggle
-  - Post summary comment: toggle
-- [ ] PATCH on submit (only changed fields sent)
-- [ ] Show success toast on save
+- [ ] Severity threshold: 3-option selector (CRITICAL "blockers only" / WARNING "schema default"
+  / INFO "post everything") — copy from the mockup's `sevOptions` hints, not placeholder text
+- [ ] Enabled categories: toggle pills (bug, security, performance, logic, style) — click to
+  add/remove, not a traditional checkbox list
+- [ ] Ignore patterns: tag list (remove via `×`) + text input to add a new glob
+- [ ] Two toggles: "Review draft pull requests" (hint: *"Drafts are skipped by default, to keep
+  Gemini spend on work that is ready."*) and "Post a PR-level summary comment" (hint: *"One
+  comment with the overall verdict, in addition to the inline comments."*)
+- [ ] "Save configuration" button — PATCH on submit (only changed fields sent)
+- [ ] Dirty-state label next to Save: "unsaved changes" while dirty, else "saved `<time>` by
+  `<user>`" (requires no new field — derive "unsaved" from form dirty state; the "saved by" half
+  needs a `RepoConfig.updatedAt`/updater, which the schema only half has — `updatedAt` exists,
+  no updater column, so render "saved `<relative time>`" and drop the "by `<user>`" clause rather
+  than inventing an author)
+- [ ] Side panel "Effect of this config": 3 rows — issues that would've posted last week at the
+  current threshold, category count + list, files skipped by ignore patterns. **This needs a new
+  read to be real** (`GET /repos/:repoId/config/effect` or computed client-side from
+  `GET /repos/:repoId/stats` + the draft config state) — out of scope this pass; ship the panel
+  wired to `/repos/:repoId/stats` for the parts it can answer (category breakdown) and omit the
+  "posted last week at this threshold" and "files skipped" rows rather than inventing numbers,
+  or mark them "coming soon"
 - [ ] Show inline validation: at least one category selected
 - [ ] Validate glob patterns client-side (basic check: not empty, no spaces)
-- [ ] "Reset to defaults" button
+
+### Acceptance criteria — Reviews tab (`RepoReviewsPanel`)
+- [ ] Lists reviews for this repo only: `GET /reviews?repoId=:repoId` (existing endpoint)
+- [ ] Same row rendering as the Reviews List screen (`ReviewCard`) — reuse, don't duplicate
+- [ ] Empty state: "No reviews for this repo" / *"This repository is connected but hasn't seen a
+  pull request since it was added."*
+
+### Acceptance criteria — Insights tab (`RepoInsightsPanel`)
+> **Open question, carried verbatim from the mockup's own "Design notes":** *"Repo detail has a
+> third tab with three metrics. If nothing is planned there, I would cut the tab rather than ship
+> an empty promise."* Two of the three mockup metrics (Most flagged path, Fix rate) have no real
+> data source anywhere in the current schema/API — `ReviewIssue` has no "resolved" state, so a
+> fix rate can't be computed. Resolution for this pass: build the tab against what's real
+> (`GET /repos/:repoId/stats`, already implemented) and show only "Issues per PR" (derivable:
+> `totalIssues / totalReviews`) plus the existing severity/category breakdown as the other two
+> cards, instead of the mockup's fabricated "Most flagged path" / "Fix rate" metrics. Revisit if
+> product wants the mockup's exact three metrics — that needs new schema (an issue-resolution
+> concept) first.
 
 ### Pseudocode
 ```
-RepoConfigForm:
+RepoDetailPage:
+  { data: repo } = useRepo(repoId)                     // GET /repos/:repoId
+  tab = searchParams.get('tab') ?? 'config'
+
+  render:
+    <RepoDetailTabs active={tab} onChange={t => router.push(`?tab=${t}`)} />
+    {tab === 'config' && <RepoConfigPanel repoId={repoId} />}
+    {tab === 'reviews' && <RepoReviewsPanel repoId={repoId} />}
+    {tab === 'insights' && <RepoInsightsPanel repoId={repoId} />}
+
+RepoConfigPanel:
   { data: config } = useRepoConfig(repoId)
   updateMutation = useUpdateRepoConfig(repoId)
 
@@ -284,23 +313,45 @@ RepoConfigForm:
 ### Edge cases
 | Case | Behaviour |
 |------|-----------|
+| repoId not found | Next.js `not-found.tsx` |
+| repoId belongs to another user | Redirect to `/repos` |
 | All categories unchecked | Zod error: "Select at least one category" |
 | Invalid glob pattern entered | Inline error below patterns field |
 | Submit with no changes | No API call (diff check) |
-| API returns 403 | Toast error + redirect to /repos |
+| API returns 403 on save | Toast error + redirect to /repos |
 | Network error on save | Toast: "Failed to save. Try again." |
+| No reviews for this repo yet | Reviews tab empty state (see AC above) |
 
 ### Test cases
 ```typescript
-describe('RepoConfigForm', () => {
+describe('RepoDetailPage', () => {
+  it('renders repo name in header')
+  it('defaults to Configuration tab')
+  it('switches tabs and reflects the choice in the URL')
+  it('shows skeleton while loading')
+  it('redirects to /repos on 403 response')
+  it('renders not-found on 404 response')
+})
+
+describe('RepoConfigPanel', () => {
   it('pre-fills form with current config values')
   it('shows error when all categories are unchecked')
   it('calls PATCH /repos/:id/config on submit')
   it('only sends changed fields in PATCH body')
   it('shows success toast on save')
   it('does not call API when nothing changed')
-  it('resets form to defaults when reset button clicked')
   it('validates glob patterns before submit')
+  it('shows "unsaved changes" label while form is dirty')
+})
+
+describe('RepoReviewsPanel', () => {
+  it('renders reviews scoped to this repo only')
+  it('shows empty state when repo has no reviews')
+})
+
+describe('RepoInsightsPanel', () => {
+  it('renders issues-per-PR derived from repo stats')
+  it('renders severity and category breakdown')
 })
 ```
 
@@ -386,6 +437,16 @@ describe('ReviewsList', () => {
 
 ## Screen: Review Detail `/reviews/[reviewId]`
 
+> **Rewritten against the mockup (2026-08-23).** Previously documented as a single accordion
+> (file header → expandable issue list). The mockup specifies a **two-panel "Split" layout**
+> instead: a 280px file rail on the left (one row per file with issues, worst-severity tick +
+> count) and the selected file's issues rendered as full cards on the right (severity+category
+> header, message, unified-diff snippet, suggestion box, actions). The mockup also has a
+> **"Stream" layout** (issues stacked top-to-bottom per file, no rail — reads like a written
+> review) behind a header toggle; per this doc's scope, **only Split is built this pass** (it's
+> the mockup's own default `revVariant`). Stream is left documented, not implemented — revisit if
+> product wants both.
+
 ### Components
 ```
 (dashboard)/reviews/[reviewId]/
@@ -393,57 +454,74 @@ describe('ReviewsList', () => {
 ├── loading.tsx
 ├── error.tsx
 └── _components/
-    ├── ReviewHeader.tsx           ← PR title, status, meta, retry/export buttons
-    ├── ReviewSummary.tsx          ← AI-generated summary text
-    ├── IssueSeverityBreakdown.tsx ← 3 severity counts as pills
-    ├── IssuesGroupedByFile.tsx    ← accordion: file → issues list
-    ├── IssueRow.tsx               ← single issue with severity badge, category, message, suggestion
-    └── ProcessingState.tsx        ← shown when PENDING or RUNNING
+    ├── ReviewHeader.tsx        ← PR title/repo/sha/author, summary text, 4 meta stats (Files/Issues/Critical/Duration)
+    ├── ProcessingState.tsx     ← shown when PENDING or RUNNING — file N of M, elapsed time, issues-so-far
+    ├── FileRail.tsx            ← left column: one button per file-with-issues, selects activeFile
+    ├── IssueCard.tsx           ← severity+category header, message, DiffSnippet, suggestion box, actions
+    └── DiffSnippet.tsx         ← unified-diff lines (context/added/removed), monospace
 ```
 
 ### Acceptance criteria
 - [ ] Polls every 5s when status is PENDING or RUNNING (stops on DONE/FAILED)
-- [ ] Shows `<ProcessingState />` with step-by-step progress UI while PENDING/RUNNING
-- [ ] On DONE: shows summary + all issues grouped by file
-- [ ] On FAILED: shows error state + Retry button
-- [ ] Issues accordion: file path as header, expandable, issue count badge
-- [ ] Each issue shows: severity icon+colour, category badge, message, suggestion (collapsible)
-- [ ] "Open on GitHub" button → links to `https://github.com/{fullName}/pull/{prNumber}`
-- [ ] Issue count in page header: "X issues across Y files"
+- [ ] Shows `<ProcessingState />` while PENDING/RUNNING: current file index/total, elapsed time,
+  running issue count (this needs no new field — derive file-index/elapsed from
+  `filesReviewed`/`createdAt` on the polled `Review` row; if that's too coarse, show a generic
+  "Reviewing…" spinner instead of a fabricated per-file counter)
+- [ ] On DONE: `ReviewHeader` (summary + 4 meta stats) + `FileRail` + selected file's `IssueCard`s
+- [ ] On FAILED: full-page failed state + Retry button
+- [ ] `FileRail`: one row per distinct `issue.file`, sorted by first appearance in `review.issues`;
+  each row shows the file's basename + directory, issue count, and a colour tick for the worst
+  severity present in that file; selecting a row shows only that file's issues
+- [ ] `IssueCard`: severity pill (colour + label, never colour alone — see design-system.md's
+  "severity is colour plus a word" rule), category label, `file:line` location, message, a small
+  diff snippet (context/added/removed lines), a suggestion box, "View on GitHub" button, and a
+  **Dismiss button that is visually present but not wired to any API call** — see the schema-gap
+  note below
+- [ ] "Open on GitHub" / "View on GitHub" → links to `https://github.com/{fullName}/pull/{prNumber}`
 - [ ] Filter issues by severity (client-side, no API call)
+
+### Dismiss button — documented schema gap
+The mockup shows a Dismiss button on every issue card. Its own "Design notes" flags this
+explicitly: *"Each issue has a Dismiss button but the schema has no state for it. Needs a
+decision before build."* `ReviewIssue` has no `dismissed`/`resolvedAt` column and no API to set
+one. **Do not invent a column or endpoint for this pass** — render the button (matches the
+mockup visually) with no `onClick` handler, or omit it entirely; either is acceptable, but do not
+wire it to a fake local-only toggle that looks persisted but isn't. Flagged in `state/blockers.md`
+pending a product decision.
 
 ### Pseudocode
 ```
 ReviewDetailPage:
-  { data: review, isLoading } = useQuery({
-    queryKey: queryKeys.review(reviewId),
-    queryFn: () => api.get(`/reviews/${reviewId}`).then(r => r.data.data),
-    refetchInterval: (data) =>
-      (!data || ['PENDING','RUNNING'].includes(data.status)) ? 5_000 : false,
-  })
+  { data: review, isLoading } = useReview(reviewId)   // polls per hooks-and-utils.md useReview
 
   if isLoading → <ReviewDetailSkeleton />
-  if review.status === 'PENDING' || 'RUNNING' → <ProcessingState review={review} />
+  if review.status in ('PENDING','RUNNING') → <ProcessingState review={review} />
   if review.status === 'FAILED' → <FailedState review={review} onRetry={retryMutation.mutate} />
 
-  issuesByFile = groupBy(review.issues, 'file')
+  fileGroups = groupBy(review.issues, 'file')   // one entry per distinct file, in first-seen order
+  [activeFile, setActiveFile] = useState(0)
+  activeIssues = fileGroups[activeFile].issues
 
   render:
     <ReviewHeader review={review} />
-    <ReviewSummary summary={review.summary} />
-    <IssueSeverityBreakdown issues={review.issues} />
-    <IssuesGroupedByFile issuesByFile={issuesByFile} />
+    <div className="grid grid-cols-[280px_1fr] gap-4">
+      <FileRail groups={fileGroups} active={activeFile} onSelect={setActiveFile} />
+      <div className="flex flex-col gap-4">
+        {activeIssues.map(issue => <IssueCard key={issue.id} issue={issue} />)}
+      </div>
+    </div>
 ```
 
 ### Edge cases
 | Case | Behaviour |
 |------|-----------|
-| Review has 0 issues | "No issues found. Great work! 🎉" empty state |
+| Review has 0 issues | "No issues found. Great work! 🎉" empty state (no file rail shown) |
 | Review is FAILED | Full-page failed state with retry button |
 | Retry mutation in flight | Retry button disabled, shows spinner |
 | reviewId belongs to another user | API 403 → redirect to `/reviews` |
 | reviewId not found | API 404 → Next.js `not-found.tsx` |
-| Review has 50 issues (max) | Renders all 50; no truncation |
+| Review has 50 issues (max) | Renders all 50 across however many files; file rail scrolls |
+| Dismiss button clicked | No-op — see schema-gap note above |
 
 ### Test cases
 ```typescript
@@ -454,27 +532,34 @@ describe('ReviewDetailPage', () => {
   it('stops polling when status is DONE')
   it('stops polling when status is FAILED')
   it('renders summary text when DONE')
-  it('renders issues grouped by file when DONE')
+  it('groups issues by file in the file rail')
+  it('shows only the active file\'s issues in the issue panel')
   it('shows processing state when PENDING or RUNNING')
   it('shows failed state with retry button when FAILED')
   it('shows empty state when review has 0 issues')
   it('filters issues by severity client-side')
-  it('shows issue count in header')
   it('opens GitHub PR link in new tab')
   it('redirects to /reviews on 403 response')
 })
 
-describe('IssueRow', () => {
-  it('renders severity icon with correct colour')
-  it('renders category badge')
-  it('renders issue message')
-  it('expands/collapses suggestion on click')
-  it('is keyboard accessible (Enter/Space to expand)')
+describe('FileRail', () => {
+  it('renders one row per distinct file with issues')
+  it('shows the worst-severity tick colour per file')
+  it('calls onSelect with the file index when a row is clicked')
+  it('highlights the active file row')
+})
+
+describe('IssueCard', () => {
+  it('renders severity pill with colour and label (not colour alone)')
+  it('renders category and file:line location')
+  it('renders the diff snippet with context/added/removed styling')
+  it('renders the suggestion box')
+  it('renders a View on GitHub link')
+  it('is keyboard accessible')
 })
 
 describe('ProcessingState', () => {
-  it('shows step indicators matching review pipeline stages')
-  it('shows spinner on active step')
-  it('shows checkmark on completed steps')
+  it('shows a spinner while RUNNING')
+  it('shows elapsed time or a generic in-progress message')
 })
 ```

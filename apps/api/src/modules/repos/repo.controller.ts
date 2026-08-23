@@ -14,6 +14,11 @@ export class RepoController {
     res.status(200).json(ok(result));
   };
 
+  getRepo = async (req: Request, res: Response) => {
+    const result = await this.repoService.getRepo(req.user!.id, req.params.repoId as string);
+    res.status(200).json(ok(result));
+  };
+
   activateRepo = async (req: Request, res: Response) => {
     const result = await this.repoService.activateRepo(req.user!.id, req.params.repoId as string);
     res.status(200).json(ok(result));

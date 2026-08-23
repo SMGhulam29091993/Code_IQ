@@ -97,6 +97,14 @@ export interface GithubRepoListItem {
   language: string | null;
 }
 
+// GitHub org membership exposes exactly two roles — no distinct "owner" role — see
+// .ai/knowledge/domains/billing.md "GET /billing/seats" for why the frontend's "owner" styling
+// (if any) is derived, not returned by this API.
+export interface GithubOrgMember {
+  login: string;
+  role: "admin" | "member";
+}
+
 // Thin wrapper around Octokit + the GitHub OAuth endpoints — injected into GithubService so
 // unit tests mock this instead of hitting the network (same pattern as IMailServiceFactory
 // in the auth module).
@@ -107,6 +115,9 @@ export interface IGithubApiClient {
   // First 100 repos accessible to the installation (single page) — see github-app.md
   // "Repo sync" for the pagination caveat.
   listInstallationRepos(githubInstallationId: number): Promise<GithubRepoListItem[]>;
+  // First 100 admins + first 100 members (single page each) — consumed by BillingService.getSeats
+  // (.ai/knowledge/domains/billing.md "GET /billing/seats").
+  listOrgMembers(githubInstallationId: number, org: string): Promise<GithubOrgMember[]>;
 }
 
 export interface IGithubService {

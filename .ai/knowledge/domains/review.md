@@ -488,6 +488,13 @@ describe('CommentService.postReview', () => {
   `false`). `diff.service.ts`'s `filterFiles` branches on `pattern.includes("/")` itself:
   slash-less patterns (e.g. `"*.test.ts"`) get `{ basename: true }` so they match at any depth
   like `.gitignore`; patterns with a slash match the full path only, with no options passed.
+- **`ReviewIssue` has no dismiss/resolution state.** The Claude Design mockup's Review Detail
+  screen (`knowledge/screens/dashboard-screens.md`) shows a Dismiss button on every issue card,
+  but there's no column here for it and no endpoint. The mockup's own design notes flag this as
+  an open product question, not a build decision — the frontend renders the button inert (no API
+  call) rather than this doc inventing a `dismissed` column speculatively. If dismiss becomes
+  real, it needs a decision on semantics first (per-user dismissal vs. global, does it affect
+  `GET /reviews/stats` counts, etc.) before a migration.
 - **`GeminiService` depends on `IGeminiClient`, not the `@google/generative-ai` SDK's own
   `GenerativeModel` type** — a narrow interface (`generateContent` only) declared in
   `review.types.ts`. `lib/gemini.ts` constructs the real `GenerativeModel` via

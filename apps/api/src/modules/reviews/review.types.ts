@@ -129,6 +129,13 @@ export interface IReviewRepository {
     userId: string,
     filters: { repoId?: string; since: Date }
   ): Promise<Array<{ date: string; count: number }>>;
+  // Consumed by BillingService.getSeats (.ai/knowledge/domains/billing.md "GET /billing/seats")
+  // — review count per prAuthor login, scoped to one installation (not one user's repos across
+  // installations, unlike every other method here — seats are an installation-level concept).
+  countReviewsByAuthorForInstallation(
+    installationId: string,
+    since: Date
+  ): Promise<Record<string, number>>;
 }
 
 export interface IReviewIssueRepository {

@@ -19,6 +19,17 @@ repoRoutes.get("/", authMiddleware, validateQuery(ListReposQuerySchema), repoCon
 
 /**
  * @swagger
+ * /repos/{repoId}:
+ *   get:
+ *     summary: Get a single repo
+ *     tags: [Repos]
+ *     security:
+ *       - bearerAuth: []
+ */
+repoRoutes.get("/:repoId", authMiddleware, repoController.getRepo);
+
+/**
+ * @swagger
  * /repos/{repoId}/activate:
  *   post:
  *     summary: Enable AI reviews for a repo
