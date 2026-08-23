@@ -2,6 +2,7 @@
 
 import { type FC, useEffect } from "react";
 import { notFound, useRouter, useSearchParams } from "next/navigation";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { LoadingSkeleton } from "@/components/ui/LoadingSkeleton";
 import { useRepo } from "@/hooks/useRepos";
@@ -14,9 +15,11 @@ interface RepoDetailTabsProps {
   repoId: string;
 }
 
+// Tab order matches the mockup's repoTabs array (Reviews, Configuration, Insights) — the
+// default *active* tab is still Configuration, but its position in the tab bar is 2nd, not 1st.
 const TABS = [
-  { id: "config", label: "Configuration" },
   { id: "reviews", label: "Reviews" },
+  { id: "config", label: "Configuration" },
   { id: "insights", label: "Insights" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
@@ -45,10 +48,7 @@ export const RepoDetailTabs: FC<RepoDetailTabsProps> = ({ repoId }) => {
 
   return (
     <div>
-      <p className="mb-2 font-mono text-xs uppercase tracking-wide text-text3">{repo.fullName}</p>
-      <h1 className="mb-6 font-display text-2xl font-semibold text-text">
-        Repository settings
-      </h1>
+      <PageHeader crumb={repo.fullName} title="Repository settings" />
 
       <div className="mb-6 flex gap-6 border-b border-border">
         {TABS.map((tab) => (

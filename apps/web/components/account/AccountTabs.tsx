@@ -2,6 +2,7 @@
 
 import { type FC } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { LoadingSkeleton } from "@/components/ui/LoadingSkeleton";
 import { useMe } from "@/hooks/useAccount";
@@ -32,6 +33,7 @@ export const AccountTabs: FC = () => {
 
   return (
     <div>
+      <PageHeader crumb="account" title="Account" />
       <div className="mb-6 flex gap-6 border-b border-border">
         {TABS.map((tab) => (
           <button

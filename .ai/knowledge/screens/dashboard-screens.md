@@ -33,9 +33,17 @@
 ├── error.tsx                        ← <ErrorBanner />
 └── _components/
     ├── StatsGrid.tsx                ← 4 stat cards, no delta (see mockup note above)
+    ├── RunningReviewsBanner.tsx     ← mockup's isProgress banner, backed by GET /reviews?status=RUNNING
     ├── RecentReviewsList.tsx        ← last 5 reviews
-    └── IssuesByCategory.tsx         ← category breakdown bars, from issuesByCategory
+    ├── IssuesByCategory.tsx         ← category breakdown bars, from issuesByCategory
+    └── SeatsCard.tsx                ← "N of M seats" mini-card, only shown when subscribed
 ```
+Added 2026-08-23 (second pass, after user feedback that the first pass was missing mockup
+detail): `RunningReviewsBanner` and `SeatsCard` — both present in the mockup's Overview from the
+start. `RunningReviewsBanner` queries real RUNNING reviews rather than mock state.
+`SeatsCard` needs `GET /billing/subscription` (seat count) + `GET /billing/seats` (assigned
+count, real GitHub org membership) — omitted entirely for FREE-tier/unsubscribed installations
+rather than showing a broken "undefined of undefined".
 
 ### Acceptance criteria
 - [ ] **StatsGrid:** shows 4 cards — Total Reviews, Issues Found, Critical Issues, Active Repos
@@ -115,6 +123,15 @@ describe('OverviewPage', () => {
 
 ## Screen: Repos List `/repos`
 
+> **Mockup note (2026-08-23, second pass):** the mockup renders this as a real table — header
+> row (Repository/Language/Reviews/Open issues/Last review) + a trailing `→` per row, not a
+> plain card list. Rebuilt as a CSS grid table (`RepoTableHeader` + `RepoCard` sharing
+> `REPO_GRID_COLS`) to match. "Open issues" is dropped — `GET /repos` has no per-repo severity
+> breakdown, same stance as the Reviews table's dropped "Issues" column. "Last review" **is**
+> real: `GET /repos` gained a `lastReviewAt` field for this (see `knowledge/domains/repos.md`).
+> Header also gained the "Add repositories" CTA (links to `/onboarding`) and a breadcrumb, via
+> the shared `PageHeader` component.
+
 ### Components
 ```
 (dashboard)/repos/
@@ -122,8 +139,8 @@ describe('OverviewPage', () => {
 ├── loading.tsx
 ├── error.tsx
 └── _components/
-    ├── ReposList.tsx              ← client component, owns filters + list
-    ├── RepoCard.tsx               ← single repo row with toggle
+    ├── ReposList.tsx              ← client component, owns filters + list + PageHeader
+    ├── RepoCard.tsx               ← single repo table row with toggle, exports RepoTableHeader
     ├── ReposListSkeleton.tsx
     └── PlanLimitBanner.tsx        ← shown when Free tier limit reached
 ```
@@ -371,6 +388,15 @@ describe('RepoInsightsPanel', () => {
 
 ## Screen: Reviews List `/reviews`
 
+> **Mockup note (2026-08-23, second pass):** this screen is a real table in the mockup (header
+> row PR/Title/Repository/Issues/Status/When), distinct from the flex-row style Overview's
+> "Recent reviews" and Repo Detail's Reviews tab use — `ReviewCard` (flex row) stays for those
+> two embedded contexts; this screen got its own `ReviewTableHeader`/`ReviewTableRow` pair
+> instead of changing `ReviewCard`'s shape for everyone. "Issues" chip column dropped — same
+> per-review-severity-data gap as everywhere else. Header CTA "Export CSV" is real (client-side
+> `lib/csv.ts`, exports the currently-loaded page of reviews — no backend endpoint for this,
+> the mockup doesn't specify a server-generated export either).
+
 ### Components
 ```
 (dashboard)/reviews/
@@ -378,8 +404,8 @@ describe('RepoInsightsPanel', () => {
 ├── loading.tsx
 ├── error.tsx
 └── _components/
-    ├── ReviewsList.tsx            ← client, owns filters + pagination
-    ├── ReviewCard.tsx             ← single row
+    ├── ReviewsList.tsx            ← client, owns filters + pagination + PageHeader + CSV export
+    ├── ReviewTableRow.tsx         ← table row + ReviewTableHeader, this screen only
     ├── ReviewFiltersBar.tsx       ← status filter + repo selector + search
     ├── ReviewsListSkeleton.tsx
     └── Pagination.tsx

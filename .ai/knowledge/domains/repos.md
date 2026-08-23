@@ -24,6 +24,10 @@ Per-repo config (`RepoConfig`) controls AI behaviour for that repo.
 - [ ] Supports filtering by installationId and isActive
 - [ ] Includes review count per repo
 - [ ] Includes active config summary per repo
+- [ ] Includes `lastReviewAt` per repo (most recent review's `createdAt`, `null` if never
+  reviewed) — added 2026-08-23 for the Repos List screen's "Last review" column
+  (`knowledge/screens/dashboard-screens.md`); fetched via `reviews: { orderBy: createdAt desc,
+  take: 1 }` alongside the existing `_count` in the same query, not a second round trip
 
 **Edge cases:**
 | Case | Expected behaviour | Status |

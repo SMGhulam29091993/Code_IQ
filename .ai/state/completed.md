@@ -1,6 +1,47 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-08-23 (Mockup-fidelity pass — sidebar, headers, tables, real Overview widgets)
+- User pushback ("you are still missing a lot of details") after Step 8, with a screenshot of
+  the mockup's Design Notes screen — its sidebar showing a footer (installation switcher + user
+  row) that Step 1's original scaffold never built. Re-read the mockup's raw HTML directly
+  (still cached in the scratchpad from the original import) rather than relying on memory, and
+  found several real structural gaps across every screen, not just the sidebar:
+  1. **Sidebar** (`components/layout/Sidebar.tsx`): added the footer (installation switcher
+     linking to `/account?tab=workspace`, user row from the new `GET /auth/me`) and real nav
+     badge counts (repo count, review total — not the mockup's static 6/48).
+  2. **Every dashboard page was missing its breadcrumb + header CTA.** New shared
+     `components/layout/PageHeader.tsx` (breadcrumb + h1 + optional action), wired into all six
+     pages: Overview (no CTA), Repos ("Add repositories" → `/onboarding`), Reviews ("Export CSV"
+     — real client-side export via new `lib/csv.ts`, no backend endpoint needed), Billing
+     ("Update payment method" → the existing billing-portal mutation), Review Detail ("Open pull
+     request", moved out of an ad hoc flex row into the shared header), Account, Repo Detail,
+     Onboarding (both already had one-off breadcrumbs, replaced with the shared component).
+  3. **Repos List and Reviews List were plain card lists; the mockup is a real table** (header
+     row + grid columns). Rebuilt both: `RepoCard`/`RepoTableHeader` share `REPO_GRID_COLS`,
+     new `ReviewTableRow`/`ReviewTableHeader` for the dedicated Reviews List screen specifically
+     (the flex-row `ReviewCard` stays for Overview's "Recent reviews" and Repo Detail's Reviews
+     tab, which use the mockup's simpler embedded-list style, not the full table).
+  4. **`GET /repos` gained a real `lastReviewAt` field** — the mockup's repo table has a "Last
+     review" column that the original response shape had no data for. Backend:
+     `repo.repository.ts`'s `findManyForUser`/`findByIdForUser` now select the latest review's
+     `createdAt` in the same query (`reviews: { take: 1, orderBy: createdAt desc }`), not a
+     second round trip. `SanitizedRepo`/`@codeiq/types` `Repo` both gained the field.
+  5. **Overview gained the mockup's two remaining widgets**: `RunningReviewsBanner` (real
+     `GET /reviews?status=RUNNING` query, not mock state) and `SeatsCard` ("N of M seats",
+     needs a real subscription — omitted entirely rather than shown broken when unsubscribed).
+  6. **Repo Detail's tab order fixed** to match the mockup (Reviews, Configuration, Insights —
+     Configuration stays the default *active* tab, but its position in the tab bar was wrong).
+  Backend repo-lookup shape change broke 17 existing route tests that mocked `prisma.repo.*`
+  directly without a `reviews` field — fixed by adding `reviews: []` to both files' `buildRepo`
+  fixtures. 311/311 `@codeiq/api`, 86/86 `@codeiq/web` tests still pass (no test needed
+  meaningful rewrites — most query by text/role, not DOM structure, so the table/card swap
+  didn't break them). Verified live in a browser again (same seeded data): this pass found zero
+  new bugs — the only console noise was the same two expected sandbox-credential gaps already
+  known (no real Stripe subscription, no real GitHub App installation for the seats call).
+  `knowledge/screens/dashboard-screens.md`, `knowledge/domains/repos.md`, and
+  `knowledge/technical/frontend/design-system.md` updated to match.
+
 ## 2026-08-23 (Frontend Step 8 — Account & Workspace settings)
 - User asked "you forgot to include the account management of user" after Step 7 — not part of
   the mockup, which has no account/settings screen at all. Clarified scope via AskUserQuestion:

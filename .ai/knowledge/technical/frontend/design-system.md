@@ -101,7 +101,8 @@ diffLine: {
 | RepoCard | `components/repos/RepoCard.tsx` | repo with active toggle |
 | StatsGrid | `components/dashboard/StatsGrid.tsx` | 4-up stat cards |
 | IssuesTrend | `components/dashboard/IssuesTrendChart.tsx` | recharts line chart |
-| Sidebar | `components/layout/Sidebar.tsx` | dashboard nav |
+| Sidebar | `components/layout/Sidebar.tsx` | dashboard nav — logo+plan badge, nav items w/ real repo/review counts, footer (installation switcher + user row, added 2026-08-23 — was missing from the initial Step 1 scaffold, see the mockup's sidebar) |
+| PageHeader | `components/layout/PageHeader.tsx` | breadcrumb + h1 title + optional right-aligned action — used identically on every dashboard page (added 2026-08-23) |
 | ErrorBanner | `components/ui/ErrorBanner.tsx` | page-level API error |
 | LoadingSkeleton | `components/ui/LoadingSkeleton.tsx` | content placeholder |
 | FileRail | `components/reviews/FileRail.tsx` | review-detail file list w/ severity tick |

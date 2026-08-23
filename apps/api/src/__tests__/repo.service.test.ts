@@ -106,9 +106,10 @@ describe("RepoService", () => {
   describe("listRepos", () => {
     it("returns repos for all of the current user's installations", async () => {
       vi.mocked(repoRepo.findManyForUser).mockResolvedValue([
-        { ...buildRepo(), reviewCount: 3 } as unknown as Repo & {
+        { ...buildRepo(), reviewCount: 3, lastReviewAt: NOW } as unknown as Repo & {
           config: RepoConfig | null;
           reviewCount: number;
+          lastReviewAt: Date | null;
         },
       ]);
 
@@ -116,6 +117,7 @@ describe("RepoService", () => {
 
       expect(result.repos).toHaveLength(1);
       expect(result.repos[0]!.reviewCount).toBe(3);
+      expect(result.repos[0]!.lastReviewAt).toEqual(NOW);
       expect(result.repos[0]!.config).toEqual({
         severityThreshold: "WARNING",
         enabledCategories: ["bug", "security", "performance", "logic"],

@@ -63,6 +63,7 @@ export interface Repo {
   language: string | null;
   isActive: boolean;
   reviewCount: number;
+  lastReviewAt: string | null;
   config: RepoConfig;
 }
 

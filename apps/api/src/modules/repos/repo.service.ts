@@ -173,7 +173,14 @@ function sanitizeConfig(config: RepoConfig): SanitizedRepoConfig {
 }
 
 function sanitizeRepo(
-  repo: { id: string; fullName: string; language: string | null; isActive: boolean; config: RepoConfig | null },
+  repo: {
+    id: string;
+    fullName: string;
+    language: string | null;
+    isActive: boolean;
+    config: RepoConfig | null;
+    lastReviewAt: Date | null;
+  },
   reviewCount: number
 ): SanitizedRepo {
   return {
@@ -182,6 +189,7 @@ function sanitizeRepo(
     language: repo.language,
     isActive: repo.isActive,
     reviewCount,
+    lastReviewAt: repo.lastReviewAt,
     config: repo.config ? sanitizeConfig(repo.config) : DEFAULT_REPO_CONFIG,
   };
 }

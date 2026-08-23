@@ -23,6 +23,10 @@ export interface SanitizedRepo {
   language: string | null;
   isActive: boolean;
   reviewCount: number;
+  // Most recent review's createdAt, null if the repo has never been reviewed. Added
+  // 2026-08-23 — .ai/knowledge/screens/dashboard-screens.md "Screen: Repos List" shows a "last
+  // review" column the mockup has and this response didn't.
+  lastReviewAt: Date | null;
   config: SanitizedRepoConfig;
 }
 
@@ -74,14 +78,19 @@ export interface RepoStatsResult {
 }
 
 export type RepoWithOwner = Repo & { installation: { userId: string; planTier: string } };
-export type RepoWithConfigAndOwner = RepoWithOwner & { config: RepoConfig | null };
+export type RepoWithConfigAndOwner = RepoWithOwner & {
+  config: RepoConfig | null;
+  lastReviewAt: Date | null;
+};
 
 export interface IRepoRepository {
   // Scoped to repos under installations owned by userId — never a bare Repo.findMany.
   findManyForUser(
     userId: string,
     filters: ListReposFilters
-  ): Promise<Array<Repo & { config: RepoConfig | null; reviewCount: number }>>;
+  ): Promise<
+    Array<Repo & { config: RepoConfig | null; reviewCount: number; lastReviewAt: Date | null }>
+  >;
   findByIdForUser(repoId: string): Promise<RepoWithConfigAndOwner | null>;
   setActive(repoId: string, isActive: boolean): Promise<void>;
   // FREE tier "3 repos max" limit (.ai/knowledge/domains/repos.md activate edge cases).

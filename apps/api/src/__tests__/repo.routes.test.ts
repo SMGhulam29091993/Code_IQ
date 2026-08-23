@@ -65,6 +65,7 @@ function buildRepo(overrides: Partial<Record<string, unknown>> = {}) {
     updatedAt: NOW,
     config: null,
     installation: { userId: "user-1", planTier: "FREE" },
+    reviews: [], // repo.repository.ts's findByIdForUser/findManyForUser select the latest review for lastReviewAt
     ...overrides,
   };
 }

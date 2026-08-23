@@ -3,6 +3,7 @@
 import { type FC, useEffect, useMemo, useState } from "react";
 import { notFound, useRouter } from "next/navigation";
 import type { IssueSeverity } from "@codeiq/types";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { LoadingSkeleton } from "@/components/ui/LoadingSkeleton";
@@ -61,89 +62,99 @@ export const ReviewDetailContent: FC<ReviewDetailContentProps> = ({ reviewId }) 
   }
 
   const prUrl = repo ? `https://github.com/${repo.fullName}/pull/${review.prNumber}` : undefined;
+  const crumb = `${repo?.fullName ?? review.repoId} · #${review.prNumber}`;
+  const openPrAction = prUrl && (
+    <a
+      href={prUrl}
+      target="_blank"
+      rel="noreferrer"
+      className="flex-none whitespace-nowrap rounded-button bg-accent px-4 py-2 text-[13px] font-bold text-bg hover:bg-accent/90"
+    >
+      Open pull request
+    </a>
+  );
 
   if (review.status === "PENDING" || review.status === "RUNNING") {
     return (
-      <div className="flex flex-col gap-4">
-        <ReviewHeader review={review} repoFullName={repo?.fullName} />
-        <ProcessingState review={review} />
+      <div>
+        <PageHeader crumb={crumb} title="Review" action={openPrAction} />
+        <div className="flex flex-col gap-4">
+          <ReviewHeader review={review} repoFullName={repo?.fullName} />
+          <ProcessingState review={review} />
+        </div>
       </div>
     );
   }
 
   if (review.status === "FAILED") {
     return (
-      <div className="flex flex-col gap-4">
-        <ReviewHeader review={review} repoFullName={repo?.fullName} />
-        <div className="flex flex-col items-center gap-3 rounded-card border border-red/20 bg-red/5 py-12 text-center">
-          <p className="text-sm text-text2">This review failed to complete.</p>
-          <Button
-            variant="secondary"
-            disabled={retryMutation.isPending}
-            onClick={() => retryMutation.mutate(reviewId)}
-          >
-            {retryMutation.isPending ? "Retrying..." : "Retry"}
-          </Button>
-          {retryMutation.isError && <ErrorBanner message={getErrorMessage(retryMutation.error)} />}
+      <div>
+        <PageHeader crumb={crumb} title="Review" action={openPrAction} />
+        <div className="flex flex-col gap-4">
+          <ReviewHeader review={review} repoFullName={repo?.fullName} />
+          <div className="flex flex-col items-center gap-3 rounded-card border border-red/20 bg-red/5 py-12 text-center">
+            <p className="text-sm text-text2">This review failed to complete.</p>
+            <Button
+              variant="secondary"
+              disabled={retryMutation.isPending}
+              onClick={() => retryMutation.mutate(reviewId)}
+            >
+              {retryMutation.isPending ? "Retrying..." : "Retry"}
+            </Button>
+            {retryMutation.isError && (
+              <ErrorBanner message={getErrorMessage(retryMutation.error)} />
+            )}
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-start justify-between gap-4">
+    <div>
+      <PageHeader crumb={crumb} title="Review" action={openPrAction} />
+      <div className="flex flex-col gap-4">
         <ReviewHeader review={review} repoFullName={repo?.fullName} />
-        {prUrl && (
-          <a
-            href={prUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="flex-none whitespace-nowrap rounded-button bg-accent px-4 py-2 text-sm font-bold text-bg hover:bg-accent/90"
-          >
-            Open pull request
-          </a>
-        )}
-      </div>
 
-      {review.issues.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-card border border-border bg-surface py-16 text-center">
-          <span className="text-2xl">🎉</span>
-          <p className="text-sm text-text2">No issues found. Great work!</p>
-        </div>
-      ) : (
-        <>
-          <div className="flex gap-2">
-            {SEVERITY_FILTERS.map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => {
-                  setSeverityFilter(s);
-                  setActiveFile(0);
-                }}
-                className={cn(
-                  "rounded-full border px-2.5 py-1 text-xs font-medium capitalize",
-                  severityFilter === s
-                    ? "border-accent/35 bg-accent/10 text-accent"
-                    : "border-border text-text2"
-                )}
-              >
-                {s}
-              </button>
-            ))}
+        {review.issues.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 rounded-card border border-border bg-surface py-16 text-center">
+            <span className="text-2xl">🎉</span>
+            <p className="text-sm text-text2">No issues found. Great work!</p>
           </div>
-
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
-            <FileRail groups={fileGroups} activeIndex={activeFile} onSelect={setActiveFile} />
-            <div className="flex flex-col gap-4">
-              {fileGroups[activeFile]?.issues.map((issue) => (
-                <IssueCard key={issue.id} issue={issue} prUrl={prUrl} />
+        ) : (
+          <>
+            <div className="flex gap-2">
+              {SEVERITY_FILTERS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => {
+                    setSeverityFilter(s);
+                    setActiveFile(0);
+                  }}
+                  className={cn(
+                    "rounded-full border px-2.5 py-1 text-xs font-medium capitalize",
+                    severityFilter === s
+                      ? "border-accent/35 bg-accent/10 text-accent"
+                      : "border-border text-text2"
+                  )}
+                >
+                  {s}
+                </button>
               ))}
             </div>
-          </div>
-        </>
-      )}
+
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
+              <FileRail groups={fileGroups} activeIndex={activeFile} onSelect={setActiveFile} />
+              <div className="flex flex-col gap-4">
+                {fileGroups[activeFile]?.issues.map((issue) => (
+                  <IssueCard key={issue.id} issue={issue} prUrl={prUrl} />
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 };

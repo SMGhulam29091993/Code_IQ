@@ -26,6 +26,14 @@ export const useSaveInstallation = () => {
   });
 };
 
+// Shared header breadcrumb across every dashboard page — the mockup shows the installation's
+// account login (e.g. "acme-corp") as the crumb on Overview/Repos/Reviews/Billing. Used with
+// components/layout/PageHeader.tsx.
+export const useAccountLogin = () => {
+  const { data: installations } = useInstallations();
+  return installations?.[0]?.accountLogin;
+};
+
 // DELETE /github/installations/:id — .ai/knowledge/screens/account-screens.md "Workspace tab".
 export const useDeleteInstallation = () => {
   const qc = useQueryClient();
