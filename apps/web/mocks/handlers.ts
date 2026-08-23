@@ -111,11 +111,13 @@ export const handlers: HttpHandler[] = [
       },
     })
   ),
+  // Wrapped in `{ review: ... }` — matches the real GetReviewResult/RetryReviewResult envelope
+  // (apps/api/src/modules/reviews/review.types.ts), unlike the /reviews list response.
   http.get("/api/reviews/:reviewId", () =>
-    HttpResponse.json({ success: true, message: "Success", data: mockReview })
+    HttpResponse.json({ success: true, message: "Success", data: { review: mockReview } })
   ),
   http.post("/api/reviews/:reviewId/retry", () =>
-    HttpResponse.json({ success: true, message: "Success", data: mockReview })
+    HttpResponse.json({ success: true, message: "Success", data: { review: mockReview } })
   ),
 
   http.get("/api/billing/plans", () =>

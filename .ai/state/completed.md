@@ -1,6 +1,74 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-08-23 (Frontend Steps 3–7 — CodeIQ Dashboard mockup implementation)
+- Imported the Claude Design mockup `CodeIQ Dashboard.dc.html` (+ `support.js`) via the
+  `claude_design` MCP and implemented it end to end in one session, committing after each part.
+  Full detail lives in `plans/frontend.md` Steps 3–7 and the rewritten `knowledge/screens/
+  {onboarding,dashboard,billing}-screens.md` — not duplicating it here. Headline items:
+  1. **Docs first**: rewrote Repo Detail (one tabbed page, not two routes) and Review Detail
+     (file-rail/issue-panel split, not an accordion) in `dashboard-screens.md`; new
+     `onboarding-screens.md`; rewrote `billing-screens.md` around plan cards/seats/invoices;
+     added 3 new endpoints to `knowledge/domains/billing.md` and 1 to `repos.md`; flagged the
+     mockup's own three open product questions (Insights tab, issue Dismiss button, seat
+     source) in `state/blockers.md` with the pragmatic default taken for each.
+  2. **Backend**: `GET /billing/{subscription,seats,invoices}` (seats resolve via GitHub org
+     membership, not a locally-invited list) and `GET /repos/:repoId`. Stripe SDK v22 renamed
+     `retrieveUpcoming` → `createPreview` and moved `current_period_start` from the subscription
+     onto its line items — both real API-surface facts discovered via typecheck, not assumed.
+     296/296 `@codeiq/api` tests pass.
+  3. **Frontend**: Onboarding (3-step install flow), Overview (stats/recent-reviews/category
+     breakdown), Repos (list + tabbed detail), Reviews (list + split-layout detail, polling),
+     Billing (plan cards/seats/invoices) — 5 screens, ~40 new components/hooks/pages. Reused
+     `ReviewCard`/`StatusBadge` across 3 screens rather than duplicating row rendering. Found
+     and fixed a real MSW handler-ordering bug (`/api/reviews/:reviewId` was greedily matching
+     `/api/reviews/stats`). 77/77 `@codeiq/web` tests pass; every screen individually
+     `typecheck`/`lint`/`build`/`test` verified before moving to the next.
+  Several mockup-vs-reality gaps resolved by building against what's real rather than what the
+  mockup's mock data showed: Overview's stat cards use real `GET /reviews/stats` fields (no
+  week-over-week delta — no historical data exists); list-view review rows show status only (no
+  per-review severity counts — `GET /reviews` doesn't return them); `IssueCard` has no diff
+  snippet (`ReviewIssue` has no diff column); Billing plan cards render real pricing from
+  `GET /billing/plans`, not the mockup's placeholder numbers (which conflict with the actually-
+  configured Stripe prices).
+  4. **Live browser verification** (CLAUDE.md's "test in a browser" rule) — seeded a real user +
+     installation + repos + reviews + issues directly into the local Postgres via a throwaway
+     script (registration needs an emailed OTP this sandbox can't receive), ran `apps/api` and
+     `apps/web` via `pnpm dev` against it, and drove every new screen with a fresh Playwright
+     install (browser binary was already cached from Step 2's session; the `playwright` npm
+     package was installed into the scratchpad, not the repo). Found and fixed two real bugs
+     neither typecheck nor the 373 mocked tests caught, because every mock already matched what
+     the code assumed rather than what the server actually returns:
+     - **`validateQuery` middleware silently discarded all `z.coerce` results.** Express 5's
+       `req.query` is a non-caching getter — it re-parses `req.url` on every access, so
+       `Object.assign(req.query, coerced)` mutated a throwaway object and every numeric/boolean
+       query param (`page`/`limit`/`days`/`isActive`) reached Prisma as a raw string, crashing
+       `GET /reviews` with a `PrismaClientValidationError` the instant a real page/limit param
+       was sent — which no prior screen had ever done. Fixed by replacing the getter with
+       `Object.defineProperty(req, "query", { value: result.data, ... })` instead of mutating
+       it; added `validate.middleware.test.ts` (2 tests, exercises a real Express app, not a
+       mocked `req.query` object) since this exact bug shape is invisible to every existing
+       route/service test.
+     - **`useReview`/`useRetryReview` didn't unwrap the `{ review: ... }` envelope.**
+       `GetReviewResult`/`RetryReviewResult` wrap the review in a `review` key (unlike the
+       `/reviews` list, which doesn't) — the hooks read `r.data.data` directly, so
+       `fileGroups`'s `for (const issue of review.issues)` crashed with "filtered is not
+       iterable" on every Review Detail page. Fixed the two hooks and the MSW mocks that had
+       matched the same wrong shape (`mocks/handlers.ts` and both review test files).
+     - Also fixed a real (if minor) cosmetic bug while looking at the Overview screen for real:
+       `RecentReviewsList` showed the raw repo `cuid` instead of its full name (`ReviewCard`'s
+       `repoName` prop was only ever wired up on the Reviews List screen).
+     All 5 screens re-verified clean (no console/page errors) after the fixes; Billing correctly
+     shows its FREE-tier empty state (real 400) and Seats correctly shows a failed-fetch state
+     (real 502 — this sandbox has no real GitHub App installation to query), which is the
+     designed behavior for missing credentials, not a bug. 298/298 `@codeiq/api` and 77/77
+     `@codeiq/web` tests pass after the fixes. Seed data (`verify@codeiq.dev` / a fake `acme-corp`
+     installation with 3 repos and 4 reviews) was left in the local dev Postgres — harmless, and
+     useful for exploring the new screens; the stale `api-api-1` Docker container (built before
+     this session, superseded by `pnpm dev` for this verification) was stopped, not restarted —
+     rebuild it (`docker compose build api`) to pick up this session's backend changes before
+     relying on it again.
+
 ## 2026-08-23 (Frontend Step 2 — Auth screens)
 - Built login and register screens end to end: `(auth)/login/page.tsx` + `LoginForm.tsx`,
   `(auth)/register/page.tsx` + `RegisterForm.tsx`, `components/providers/AuthProvider.tsx`,

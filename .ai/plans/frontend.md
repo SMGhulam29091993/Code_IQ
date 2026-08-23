@@ -64,56 +64,92 @@
 > `knowledge/screens/{onboarding,dashboard,billing}-screens.md` for full AC/pseudocode/tests per
 > screen and `knowledge/domains/billing.md` for the 3 new endpoints Step 7 now depends on.
 
-## Step 3 — Onboarding [ not-started ]
-- [ ] `(dashboard)/onboarding/page.tsx`: 3-step flow (Install App → Choose repos → Open a PR)
-- [ ] `components/onboarding/{OnboardingSteps,InstallStep,ChooseReposStep,OpenPrStep}.tsx`
-- [ ] Installation saved via existing `POST /github/install`; repo activation via existing
+## Step 3 — Onboarding [ complete ]
+- [x] `(dashboard)/onboarding/page.tsx`: 3-step flow (Install App → Choose repos → Open a PR)
+- [x] `components/onboarding/{OnboardingSteps,InstallStep,ChooseReposStep,OpenPrStep,StepShell}.tsx`
+- [x] Installation saved via existing `POST /github/install`; repo activation via existing
   `POST /repos/:id/activate`
+- [x] `NEXT_PUBLIC_GITHUB_APP_SLUG` added (`.env`/`.env.example`) — needed to build the
+  `github.com/apps/<slug>/installations/new` install link; no App slug env var existed before
+- [x] `hooks/{useInstallations,useRepos,useReviews,useBilling}.ts` implemented for real (were
+  pseudocode-only in `hooks-and-utils.md`); `@codeiq/types` grew `Repo`/`RepoConfig`/`Review`/
+  `ReviewIssue`/billing shapes; `lib/utils.ts` grew `getErrorMessage`/`formatTimeAgo`/`groupBy`/
+  `getSeverityColor`/`isValidGlob` (all documented in `hooks-and-utils.md` but unimplemented)
+- [x] Component test: `OnboardingSteps.test.tsx` (4)
+- Verified: `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm test` all pass for `@codeiq/web`
 - Domain: `knowledge/domains/github-app.md`, `knowledge/domains/repos.md`
 - Screen: `knowledge/screens/onboarding-screens.md`
 
-## Step 4 — Dashboard overview [ not-started ]
-- [ ] `(dashboard)/overview/page.tsx`
-- [ ] `components/dashboard/StatsGrid.tsx`: 4 stat cards (Reviews this week, Issues found, Median
-  review, Failed reviews — from `GET /reviews/stats`)
-- [ ] `components/dashboard/RecentReviewsList.tsx`: last 5 reviews
-- [ ] `components/dashboard/IssuesByCategory.tsx`: category breakdown bars
-- [ ] loading.tsx + error.tsx + empty state (each section fails/loads independently)
+## Step 4 — Dashboard overview [ complete ]
+- [x] `(dashboard)/overview/page.tsx`
+- [x] `components/dashboard/StatsGrid.tsx`: 4 stat cards (Total Reviews/Issues Found/Critical
+  Issues/Active Repos — **not** the mockup's Reviews-this-week/Median-review/Failed-reviews set;
+  see the screen doc's mockup note for why — no delta badges either, no historical comparison
+  data exists)
+- [x] `components/dashboard/RecentReviewsList.tsx`: last 5 reviews, own empty/error state
+- [x] `components/dashboard/IssuesByCategory.tsx`: category breakdown bars (replaces the
+  originally-planned `PendingActionItems.tsx`, cut — no mockup reference, no distinct data)
+- [x] `components/reviews/{ReviewCard,StatusBadge}.tsx`: shared row component, reused by Steps
+  5 and 6 too — `GET /reviews` (list) has no per-review severity counts, so list rows show
+  status only, not the mockup's crit/warn/info chips (those need `GET /reviews/:id`)
+- [x] loading.tsx + error.tsx; each section (stats/recent/category) loads and fails independently
+- [x] Component test: `OverviewContent.test.tsx` (4) — caught and fixed an MSW handler-ordering
+  bug (`/api/reviews/:reviewId` was swallowing `/api/reviews/stats`)
+- Verified: `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm test` all pass for `@codeiq/web`
 - Domain: `knowledge/domains/review.md`
 - Screen: `knowledge/screens/dashboard-screens.md` ("Screen: Overview")
 - Note: mockup's "editorial" overview treatment is documented but not built — "standard" only
 
-## Step 5 — Repos screens [ not-started ]
-- [ ] `(dashboard)/repos/page.tsx`: repo list with activate/deactivate toggles
-- [ ] `components/repos/RepoCard.tsx`
-- [ ] `(dashboard)/repos/[repoId]/page.tsx`: **one page, 3 tabs** (Configuration/Reviews/
-  Insights) — not the old two-route (`/settings`) design
-- [ ] `components/repos/{RepoDetailTabs,RepoConfigPanel,RepoReviewsPanel,RepoInsightsPanel}.tsx`
-- [ ] All edge cases: loading, error, empty, plan limit warning
-- Domain: `knowledge/domains/repos.md` (includes new `GET /repos/:repoId`)
+## Step 5 — Repos screens [ complete ]
+- [x] `(dashboard)/repos/page.tsx`: repo list with active/inactive/search filters, optimistic
+  activate/deactivate toggle, proactive + reactive (403) plan-limit banner
+- [x] `components/repos/{RepoCard,PlanLimitBanner,ReposList}.tsx`
+- [x] `(dashboard)/repos/[repoId]/page.tsx`: **one page, 3 tabs** (Configuration/Reviews/
+  Insights) — replaces the old two-route (`/settings`) design
+- [x] `components/repos/{RepoDetailTabs,RepoConfigPanel,RepoReviewsPanel,RepoInsightsPanel}.tsx`
+- [x] Insights tab ships only what's real: issues-per-PR (derived) + severity/category
+  breakdown — the mockup's "most flagged path"/"fix rate" have no schema backing (see the
+  screen doc's Insights-tab note)
+- [x] All edge cases: loading, error (403/404), empty, plan limit warning
+- [x] Component tests: `ReposList.test.tsx` (6), `RepoConfigPanel.test.tsx` (4)
+- Verified: `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm test` all pass for `@codeiq/web`
+- Domain: `knowledge/domains/repos.md` (includes new `GET /repos/:repoId`, added same session)
 - Screen: `knowledge/screens/dashboard-screens.md` ("Screen: Repo Detail")
 
-## Step 6 — Reviews screens [ not-started ]
-- [ ] `(dashboard)/reviews/page.tsx`: full review list with filters + pagination
-- [ ] `components/reviews/ReviewCard.tsx`
-- [ ] `(dashboard)/reviews/[reviewId]/page.tsx`: **Split layout** (file rail + issue panel) —
-  Stream layout documented but not built this pass
-- [ ] `components/reviews/{FileRail,IssueCard,DiffSnippet,ProcessingState}.tsx`
-- [ ] `components/reviews/SeverityBadge.tsx`, `CategoryBadge.tsx`
-- [ ] Retry button for FAILED reviews
-- [ ] Polling for PENDING/RUNNING reviews (`refetchInterval: 5000`)
-- [ ] Dismiss button rendered inert (no API — schema gap, see `knowledge/domains/review.md`)
+## Step 6 — Reviews screens [ complete ]
+- [x] `(dashboard)/reviews/page.tsx`: full review list, status+repo filters and pagination
+  reflected in the URL, Retry on FAILED
+- [x] `(dashboard)/reviews/[reviewId]/page.tsx`: **Split layout** (file rail + issue panel) —
+  Stream layout stays documented but unbuilt this pass
+- [x] `components/reviews/{ReviewFiltersBar,Pagination,ReviewsList,ReviewHeader,FileRail,
+  IssueCard,ProcessingState,ReviewDetailContent}.tsx`
+- [x] No `DiffSnippet.tsx`/`SeverityBadge.tsx`/`CategoryBadge.tsx` — `ReviewIssue` has no diff
+  field in the schema (dropped, see `IssueCard`'s inline note), severity/category render as
+  plain labelled pills inline rather than as separate components (no reuse need beyond IssueCard)
+- [x] Polling for PENDING/RUNNING reviews (`useReview`'s `refetchInterval`)
+- [x] Dismiss button rendered inert (no API — schema gap, see `knowledge/domains/review.md`)
+- [x] Client-side severity filter on the detail page
+- [x] Component tests: `ReviewsList.test.tsx` (5), `ReviewDetailContent.test.tsx` (5)
+- Verified: `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm test` all pass for `@codeiq/web`
 - Domain: `knowledge/domains/review.md`
 - Screen: `knowledge/screens/dashboard-screens.md` ("Screen: Review Detail")
 
-## Step 7 — Billing screen [ not-started ]
-- [ ] Backend first: `GET /billing/{subscription,seats,invoices}` (`knowledge/domains/
-  billing.md`) — Billing screen has no real data to render without these
-- [ ] `(dashboard)/billing/page.tsx`: `PlanCards`, `SeatsPanel`, `NextInvoiceCard`, `InvoicesList`
-- [ ] Checkout redirect flow (existing `POST /billing/checkout`)
-- [ ] Billing portal redirect (existing `POST /billing/portal`)
+## Step 7 — Billing screen [ complete ]
+- [x] Backend first: `GET /billing/{subscription,seats,invoices}` (`knowledge/domains/
+  billing.md`) — added same session, `apps/api` Part B, 296/296 API tests passing
+- [x] `(dashboard)/billing/page.tsx`: `PlanCards`, `SeatsPanel`, `NextInvoiceCard`, `InvoicesList`
+- [x] Checkout redirect flow (existing `POST /billing/checkout`); Billing portal redirect
+  (existing `POST /billing/portal`)
+- [x] FREE-tier empty state when `GET /billing/subscription` 400s; `?success=true` banner
+- [x] Plan pricing/limits render from `GET /billing/plans` (real numbers) — not the mockup's
+  placeholder pricing, see the screen doc's pricing note
+- [x] Component test: `BillingContent.test.tsx` (7)
+- Verified: `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm test` all pass for `@codeiq/web`
 - Domain: `knowledge/domains/billing.md`
 - Screen: `knowledge/screens/billing-screens.md`
+- **This completes the CodeIQ Dashboard mockup implementation** (2026-08-23) — Steps 3–7 all
+  shipped in one session, screen by screen, each committed separately. 77/77 frontend tests,
+  296/296 backend tests, clean typecheck/lint/build on both apps.
 
 ## Step 8 — Polish [ not-started ]
 - [ ] Framer Motion page transitions

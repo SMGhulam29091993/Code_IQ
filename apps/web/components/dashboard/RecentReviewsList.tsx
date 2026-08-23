@@ -4,12 +4,15 @@ import { type FC } from "react";
 import Link from "next/link";
 import { ReviewCard, ReviewCardSkeleton } from "@/components/reviews/ReviewCard";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
+import { useRepos } from "@/hooks/useRepos";
 import { useReviews } from "@/hooks/useReviews";
 
 // .ai/knowledge/screens/dashboard-screens.md "Screen: Overview" — last 5 reviews, own
 // loading/error/empty state (each Overview section fails independently).
 export const RecentReviewsList: FC = () => {
   const { data, isLoading, error, refetch } = useReviews({ limit: 5, page: 1 });
+  const { data: repos } = useRepos();
+  const repoName = (repoId: string) => repos?.find((r) => r.id === repoId)?.fullName;
 
   return (
     <div className="overflow-hidden rounded-card border border-border bg-surface">
@@ -43,7 +46,9 @@ export const RecentReviewsList: FC = () => {
 
       {!error &&
         !isLoading &&
-        data?.reviews.map((review) => <ReviewCard key={review.id} review={review} />)}
+        data?.reviews.map((review) => (
+          <ReviewCard key={review.id} review={review} repoName={repoName(review.repoId)} />
+        ))}
     </div>
   );
 };

@@ -23,10 +23,16 @@ export const useReviews = (filters: ReviewFilters) =>
 
 const POLL_STATUSES = new Set(["PENDING", "RUNNING"]);
 
+// GET /reviews/:id wraps the review in a `review` key (unlike the /reviews list, which
+// doesn't) — see apps/api/src/modules/reviews/review.types.ts GetReviewResult. Caught live via
+// a real browser session against the real API, not by any test — every component test mocks
+// this handler directly returning the correctly-shaped `{ review: {...} }` envelope, matching
+// what the code assumed rather than what the backend actually returns.
 export const useReview = (reviewId: string) =>
   useQuery({
     queryKey: queryKeys.review(reviewId),
-    queryFn: () => api.get<{ data: Review }>(`/reviews/${reviewId}`).then((r) => r.data.data),
+    queryFn: () =>
+      api.get<{ data: { review: Review } }>(`/reviews/${reviewId}`).then((r) => r.data.data.review),
     enabled: !!reviewId,
     refetchInterval: (query) => {
       const data = query.state.data;
@@ -38,7 +44,9 @@ export const useRetryReview = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (reviewId: string) =>
-      api.post<{ data: Review }>(`/reviews/${reviewId}/retry`).then((r) => r.data.data),
+      api
+        .post<{ data: { review: Review } }>(`/reviews/${reviewId}/retry`)
+        .then((r) => r.data.data.review),
     onSuccess: (_data, reviewId) => {
       qc.invalidateQueries({ queryKey: queryKeys.review(reviewId) });
       qc.invalidateQueries({ queryKey: ["reviews"] });

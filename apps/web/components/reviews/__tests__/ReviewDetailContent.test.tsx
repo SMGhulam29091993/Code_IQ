@@ -40,7 +40,7 @@ describe("ReviewDetailContent", () => {
         HttpResponse.json({
           success: true,
           message: "Success",
-          data: { ...mockReview, status: "RUNNING", issues: [] },
+          data: { review: { ...mockReview, status: "RUNNING", issues: [] } },
         })
       )
     );
@@ -56,7 +56,7 @@ describe("ReviewDetailContent", () => {
         HttpResponse.json({
           success: true,
           message: "Success",
-          data: { ...mockReview, status: "FAILED", issues: [] },
+          data: { review: { ...mockReview, status: "FAILED", issues: [] } },
         })
       )
     );
@@ -72,7 +72,7 @@ describe("ReviewDetailContent", () => {
         HttpResponse.json({
           success: true,
           message: "Success",
-          data: { ...mockReview, issues: [] },
+          data: { review: { ...mockReview, issues: [] } },
         })
       )
     );
@@ -89,11 +89,13 @@ describe("ReviewDetailContent", () => {
           success: true,
           message: "Success",
           data: {
-            ...mockReview,
-            issues: [
-              mockReview.issues[0]!,
-              { ...mockReview.issues[0]!, id: "iss_2", severity: "info", message: "Info issue" },
-            ],
+            review: {
+              ...mockReview,
+              issues: [
+                mockReview.issues[0]!,
+                { ...mockReview.issues[0]!, id: "iss_2", severity: "info", message: "Info issue" },
+              ],
+            },
           },
         })
       )

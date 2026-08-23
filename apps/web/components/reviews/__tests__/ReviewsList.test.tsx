@@ -106,7 +106,7 @@ describe("ReviewsList", () => {
         return HttpResponse.json({
           success: true,
           message: "Success",
-          data: { ...mockReviewSummary, status: "PENDING" },
+          data: { review: { ...mockReviewSummary, status: "PENDING" } },
         });
       })
     );
