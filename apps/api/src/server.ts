@@ -1,3 +1,8 @@
+// Must load before any relative import below — @codeiq/db (imported transitively via ./app)
+// reads process.env.DATABASE_URL synchronously at module-evaluation time to construct its
+// Prisma driver adapter (see packages/db/src/index.ts).
+import "dotenv/config";
+
 import { app } from "./app";
 import { reviewJobProcessor } from "./container";
 import { startReviewWorker } from "./jobs/worker";
