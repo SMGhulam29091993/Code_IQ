@@ -3,13 +3,14 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
-import { useAuthStore } from "@/store/auth.store";
+import { useAuth } from "@/hooks/useAuth";
 
-// Auth guard per .ai/rules/frontend.md "Auth guard pattern". Rehydrating a persisted
-// session from localStorage on load is the Step 2 AuthProvider's job (.ai/plans/frontend.md) —
-// until that lands, a real returning user bounces to /login on refresh here.
+// Auth guard per .ai/rules/frontend.md "Auth guard pattern". AuthProvider (mounted in
+// app/providers.tsx, wrapping this layout) rehydrates a persisted session from localStorage
+// and gates rendering until that finishes, so isAuthenticated is already accurate by the time
+// this guard's own effect runs.
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const { isAuthenticated } = useAuth();
   const router = useRouter();
 
   useEffect(() => {

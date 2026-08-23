@@ -22,6 +22,20 @@ export interface AuthTokens {
   refreshToken: string;
 }
 
+// POST /auth/login and POST /auth/verify-otp response — matches apps/api/src/modules/auth/
+// auth.types.ts AuthTokensResult.
+export interface AuthTokensResult extends AuthTokens {
+  user: User;
+}
+
+// POST /auth/register response — registration issues an OTP, not tokens (two-step flow, see
+// .ai/knowledge/domains/auth.md). Matches apps/api/src/modules/auth/auth.types.ts
+// RegisterResult.
+export interface RegisterResult {
+  identifier: string;
+  user: User;
+}
+
 // GitHub App installation summary — matches
 // apps/api/src/modules/github/github.types.ts SanitizedInstallation.
 export interface Installation {

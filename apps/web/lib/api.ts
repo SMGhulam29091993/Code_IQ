@@ -29,11 +29,19 @@ function processQueue(error: unknown, token: string | null) {
   failedQueue = [];
 }
 
+// A 401 from one of these is a direct credential/token failure (wrong password, expired OTP
+// session, dead refresh token), not "access token expired mid-session" — there's no access
+// token to refresh in the first place, and refresh-and-retry would just misreport it (e.g. a
+// wrong-password login attempt getting reported as "session expired" instead of showing the
+// real error). Let it propagate so the calling form's own onError handles it.
+const PUBLIC_AUTH_PATHS = /^\/auth\/(login|register|verify-otp|refresh)(\/|$)/;
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const original = error.config;
-    if (error.response?.status === 401 && !original._retry) {
+    const isPublicAuthCall = PUBLIC_AUTH_PATHS.test(original?.url ?? "");
+    if (error.response?.status === 401 && !original._retry && !isPublicAuthCall) {
       original._retry = true;
       if (isRefreshing) {
         return new Promise<string>((resolve, reject) => failedQueue.push({ resolve, reject })).then(

@@ -185,43 +185,72 @@ export const isValidGlob = (pattern: string): boolean =>
   pattern.trim().length > 0 && !pattern.includes(' ')
 ```
 
+### `passwordStrength` (`lib/password-strength.ts`)
+```typescript
+// Visual-only indicator for the Register screen — the actual requirement enforced is the Zod
+// schema's min(8)/max(128), not this heuristic. null for an empty password (nothing to show yet).
+export type PasswordStrength = 'weak' | 'medium' | 'strong'
+export function passwordStrength(password: string): PasswordStrength | null { ... }
+```
+
 ---
 
 ## AuthProvider (`components/providers/AuthProvider.tsx`)
+
+The version below was never actually implemented as written — it destructured `token` from
+`useAuthStore()` (always `null` on a fresh page load, since nothing had populated it yet) and
+its "rehydrate on mount" effect body was just a comment, no `localStorage` read anywhere. It
+would build and typecheck fine while doing nothing on mount — the bug was invisible until
+someone actually reloaded a page while logged in and watched the dashboard guard bounce them to
+`/login` anyway. Fixed version below actually reads `localStorage`, and — just as importantly —
+gates rendering of `children` until that read finishes, because `(dashboard)/layout.tsx`'s own
+guard effect fires on mount too; without gating, the guard's effect can run (and redirect, since
+`isAuthenticated` still reads `false` at that instant) before this rehydration effect gets a
+chance to run first. See `decisions/` — no dedicated ADR, but the reasoning lives in this
+component's own comments.
+
 ```typescript
 'use client'
-// Rehydrates auth store on mount + listens for multi-tab logout
+// Rehydrates auth store on mount + listens for multi-tab logout. Mounted once, high in the
+// tree (app/providers.tsx), wrapping every route including (dashboard)'s own guard.
 export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const { token, refreshToken, logout } = useAuthStore()
+  const [hydrated, setHydrated] = useState(false)
+  const router = useRouter()
 
-  // Rehydrate on mount
   useEffect(() => {
-    if (token) {
-      // Verify token is still valid by fetching user silently
-      // If 401, interceptor handles refresh or logout
+    const token = localStorage.getItem('auth-token')
+    const refreshToken = localStorage.getItem('auth-refresh')
+    if (token && refreshToken) {
+      useAuthStore.getState().rehydrate(token, refreshToken)  // no `user` — no GET /auth/me yet
     }
-  }, [])
+    setHydrated(true)
 
-  // Multi-tab logout
-  useEffect(() => {
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'auth-token' && e.newValue === null) {
-        logout()
+    // Multi-tab logout: logout() removes 'auth-token' in the tab that called it, which fires a
+    // 'storage' event in every *other* tab with this page open (browsers never fire it in the
+    // tab that made the change) — mirror that logout locally there too.
+    function onStorage(event: StorageEvent) {
+      if (event.key === 'auth-token' && event.newValue === null) {
+        useAuthStore.getState().logout()
+        router.push('/login?reason=session_expired')
       }
     }
-    window.addEventListener('storage', handleStorage)
-    return () => window.removeEventListener('storage', handleStorage)
-  }, [logout])
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [router])
 
-  return <>{children}</>
+  if (!hydrated) return null  // blocks children (and their mount-time guards) until rehydrated
+
+  return children
 }
 ```
 **Test cases:**
 ```typescript
 describe('AuthProvider', () => {
+  it('renders children once hydrated')
+  it('rehydrates the store from localStorage on mount')
+  it('does not rehydrate when localStorage has no session')
   it('calls logout when auth-token is removed in another tab (storage event)')
   it('does not call logout for unrelated storage events')
-  it('renders children')
 })
 ```
 

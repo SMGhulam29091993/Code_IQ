@@ -15,21 +15,29 @@
 ```
 
 ### Acceptance criteria
-- [ ] Form fields: email (type=email), password (type=password)
-- [ ] Submit button disabled while `isSubmitting`
-- [ ] On success → store tokens in auth store → redirect to `/overview`
-- [ ] Show inline field errors from Zod on blur
-- [ ] Show API error banner below form on 401 ("Invalid email or password")
-- [ ] Show API error banner on 429 ("Too many attempts. Try again in 15 minutes.")
-- [ ] "Forgot password?" link present (links to `/forgot-password` — future screen)
-- [ ] "Create account" link → `/register`
-- [ ] Form submission on Enter key
-- [ ] No `console.log` of credentials
+- [x] Form fields: email (type=email), password (type=password)
+- [x] Submit button disabled while the login mutation is in flight — this must be
+  `loginMutation.isPending`, not react-hook-form's `formState.isSubmitting`. `isSubmitting` is
+  only `true` while the `onSubmit` handler itself is pending; a handler that calls
+  `mutation.mutate()` (fire-and-forget) instead of awaiting it returns synchronously, so
+  `isSubmitting` flips back to `false` before the network request even resolves — the button
+  re-enables instantly instead of staying disabled through the real request. Caught by actually
+  running the component test for this case, not by inspection.
+- [x] On success → store tokens in auth store → redirect to `/overview`
+- [x] Show inline field errors from Zod on submit (not blur — `useForm()`'s default `mode` is
+  `onSubmit`; this doc previously said "on blur" here while its own Test Cases section already
+  said "on submit" below, an internal inconsistency resolved in favor of submit-time validation)
+- [x] Show API error banner below form on 401 ("Invalid email or password")
+- [x] Show API error banner on 429 ("Too many attempts. Try again in 15 minutes.")
+- [x] "Forgot password?" link present (links to `/forgot-password` — future screen)
+- [x] "Create account" link → `/register`
+- [x] Form submission on Enter key (native `<form onSubmit>` behavior — no extra code needed)
+- [x] No `console.log` of credentials
 
 ### Pseudocode
 ```
 LoginForm:
-  schema = z.object({ email: z.string().email(), password: z.string().min(1) })
+  schema = z.object({ email: z.string().email('Invalid email format'), password: z.string().min(1, 'Password is required') })
   form = useForm({ resolver: zodResolver(schema) })
   loginMutation = useMutation({
     mutationFn: (data) => api.post('/auth/login', data).then(r => r.data.data),
@@ -37,7 +45,7 @@ LoginForm:
       authStore.login(token, refreshToken, user)
       router.push('/overview')
     onError: (err) =>
-      setApiError(err.response?.data?.message ?? 'Something went wrong')
+      setApiError(loginErrorMessage(err))  // maps 401/429/network/generic to exact AC strings
   })
 
   onSubmit(data):
@@ -45,11 +53,17 @@ LoginForm:
     loginMutation.mutate(data)
 
   render:
+    // See knowledge/technical/frontend/component-conventions.md's mandatory form pattern —
+    // label + input + role="alert" error paragraph, not an `error` prop on Input.
     <form onSubmit={handleSubmit(onSubmit)}>
-      <Input id="email" type="email" error={errors.email?.message} {...register('email')} />
-      <Input id="password" type="password" error={errors.password?.message} {...register('password')} />
+      <label htmlFor="email">Email</label>
+      <Input id="email" type="email" aria-invalid={!!errors.email} {...register('email')} />
+      {errors.email && <p role="alert">{errors.email.message}</p>}
+      ...same for password...
       {apiError && <ErrorBanner message={apiError} />}
-      <Button type="submit" loading={isSubmitting}>Sign in</Button>
+      <Button type="submit" disabled={loginMutation.isPending}>
+        {loginMutation.isPending ? 'Signing in...' : 'Sign in'}
+      </Button>
     </form>
 ```
 
@@ -97,25 +111,38 @@ describe('LoginForm', () => {
     └── RegisterForm.tsx
 ```
 
+**Two-step flow, not one.** `POST /auth/register` does not return tokens — it creates the user
+and issues an OTP (`.ai/knowledge/domains/auth.md`: "Registration is a two-step flow"). Tokens
+only come back from a subsequent `POST /auth/verify-otp`. The original version of this doc
+assumed register returned tokens directly (`onSuccess: ({ token, refreshToken, user }) => ...`)
+— that pseudocode never matched the actual backend contract and would have shipped a broken
+screen. Fixed below to match `auth.service.ts`'s real `RegisterResult` (`{ identifier, user }`).
+
 ### Acceptance criteria
-- [ ] Form fields: name, email, password, confirm password
-- [ ] Client-side: password === confirmPassword before submit
-- [ ] Password strength indicator (weak/medium/strong — visual only)
-- [ ] On success → store tokens → redirect to `/install` (GitHub App install flow)
-- [ ] Show inline Zod errors per field
-- [ ] Show API 409 error as inline email field error ("This email is already registered")
-- [ ] "Already have an account?" link → `/login`
-- [ ] Terms of service checkbox (must be checked to submit)
+- [x] Form fields: name, email, password, confirm password
+- [x] Client-side: password === confirmPassword before submit
+- [x] Password strength indicator (weak/medium/strong — visual only)
+- [x] On successful `POST /auth/register` → same page switches to an inline OTP-entry step (not
+  a separate route) — "Check your email", 6-digit code input
+- [x] On successful `POST /auth/verify-otp` → store tokens → redirect to `/install`
+- [x] Show inline Zod errors per field
+- [x] Show API 409 error as inline email field error ("This email is already registered"),
+  staying on the register step
+- [x] "Already have an account?" link → `/login`
+- [x] Terms of service checkbox (must be checked to submit)
+- [x] OTP step: "Start over with a different email" returns to the register step
 
 ### Pseudocode
 ```
 RegisterForm:
-  schema = z.object({
-    name: z.string().min(1).max(100),
-    email: z.string().email(),
-    password: z.string().min(8).max(128),
+  step: 'register' | 'verify-otp' — local state, same component/page, no route change
+
+  registerSchema = z.object({
+    name: z.string().trim().min(1, 'Name is required').max(100, 'Name too long'),
+    email: z.string().email('Invalid email format'),
+    password: z.string().min(8, 'Password must be at least 8 characters').max(128, 'Password too long'),
     confirmPassword: z.string(),
-    terms: z.literal(true, { errorMap: () => ({ message: 'You must accept the terms' }) }),
+    terms: z.boolean().refine(v => v === true, { message: 'You must accept the terms' }),
   }).refine(d => d.password === d.confirmPassword, {
     message: 'Passwords do not match',
     path: ['confirmPassword'],
@@ -123,14 +150,29 @@ RegisterForm:
 
   registerMutation = useMutation({
     mutationFn: (data) => api.post('/auth/register', omit(data, ['confirmPassword','terms'])),
-    onSuccess: ({ token, refreshToken, user }) =>
-      authStore.login(token, refreshToken, user)
-      router.push('/install')
+    onSuccess: ({ identifier, user }) =>
+      setIdentifier(identifier)
+      setStep('verify-otp')
     onError: (err) =>
       if err.response?.status === 409:
         form.setError('email', { message: 'This email is already registered' })
       else:
         setApiError(err.response?.data?.message ?? 'Something went wrong')
+  })
+
+  // step === 'verify-otp':
+  otpSchema = z.object({ otp: z.string().regex(/^\d{6}$/, 'OTP must be 6 digits') })
+
+  verifyOtpMutation = useMutation({
+    mutationFn: (data) => api.post('/auth/verify-otp', { identifier, otp: data.otp }),
+    onSuccess: ({ token, refreshToken, user }) =>
+      authStore.login(token, refreshToken, user)
+      router.push('/install')
+    onError: (err) =>
+      // Backend throws exact user-facing strings for every documented case
+      // (400 OTP expired/invalid, 401 Invalid OTP, 403 too many attempts) — pass
+      // err.response.data.message straight through rather than re-deriving it.
+      setApiError(err.response?.data?.message ?? 'Something went wrong')
   })
 ```
 
@@ -139,9 +181,13 @@ RegisterForm:
 |------|-----------|
 | Passwords do not match | Zod refine error on confirmPassword field |
 | Terms not checked | Zod error: "You must accept the terms" |
-| Email already taken (409) | Inline error on email field (not banner) |
+| Email already taken (409) | Inline error on email field (not banner), stays on register step |
 | Name is only whitespace | Zod error after trim |
 | Password > 128 chars | Zod error |
+| OTP expired/invalid (400) | Banner shows backend's message, stays on OTP step |
+| OTP wrong, under 3 attempts (401) | Banner: "Invalid OTP" |
+| OTP wrong on 3rd attempt (403) | Banner shows backend's "too many attempts" message; user must "start over" with a different email — the locked account has no path back on this step |
+| User clicks "start over" | Returns to register step, clears apiError, discards `identifier` |
 
 ### Test cases
 ```typescript
@@ -150,12 +196,18 @@ describe('RegisterForm', () => {
   it('shows error when passwords do not match')
   it('shows error when terms not checked')
   it('shows inline email error on 409 conflict')
-  it('redirects to /install on successful registration')
-  it('omits confirmPassword and terms from API payload')
-  it('stores tokens in auth store on success')
+  it('omits confirmPassword and terms from the API payload')
   it('shows password strength indicator')
   it('disables submit while submitting')
   it('shows generic error banner on 500')
+
+  describe('after successful registration (OTP step)', () => {
+    it('advances to the OTP step on successful registration')
+    it('stores tokens in auth store on successful verification')
+    it('redirects to /install on successful verification')
+    it("shows the backend's message on an invalid OTP")
+    it("returns to the register step via 'start over'")
+  })
 })
 ```
 
