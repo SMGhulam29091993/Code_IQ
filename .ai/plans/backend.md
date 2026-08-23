@@ -31,6 +31,13 @@
 - [x] Integration tests: `__tests__/auth.routes.test.ts` (12 tests, real Express app via supertest, DB/Redis/mail mocked at module boundary)
 - Verified: `pnpm typecheck`, `pnpm lint`, and `pnpm test` (41/41) all pass clean for `@codeiq/api`.
 - Domain: `knowledge/domains/auth.md` ✓
+- **Revisited 2026-08-23:** `refresh-token.repository.ts` moved from Postgres to Redis
+  (`RefreshToken` Prisma model dropped, migration `20260823105451_drop_refresh_token_table`) —
+  see `decisions/006-redis-for-refresh-tokens.md` and `knowledge/domains/auth.md`'s
+  `POST /auth/logout` implementation note. Test counts unchanged (mock shapes updated, no
+  cases added/removed); full suite re-verified clean, plus a live end-to-end run (register →
+  login → refresh → logout → refresh-after-logout correctly rejected) against real
+  Postgres/Redis, both via `tsx` and inside the rebuilt Docker container.
 
 ## Step 3 — GitHub App module [ complete ]
 - [x] `src/lib/octokit.ts`: App + installation Octokit factory (pinned to CJS-compatible

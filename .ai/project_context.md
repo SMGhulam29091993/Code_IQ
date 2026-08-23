@@ -89,6 +89,7 @@ Turborepo monorepo
 - `decisions/003-otp-verification-for-registration.md`
 - `decisions/004-nodemailer-factory-pattern-for-mail-service.md`
 - `decisions/005-pgvector-over-pinecone.md` *(future)*
+- `decisions/006-redis-for-refresh-tokens.md`
 
 ## Memory
 - `memory/lessons.md`

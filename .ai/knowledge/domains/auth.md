@@ -360,6 +360,15 @@ describe('AuthService.logout', () => {
 })
 ```
 
+**Implementation note (refresh token storage):** `refreshTokenRepo` (`IRefreshTokenRepository`,
+`auth.types.ts`) is Redis-backed, not a Postgres table — `refresh_token:<token>` → owning
+`userId`, TTL set from `refreshTokenExpiry()` (7 days) so the store and the JWT's own `exp`
+never disagree, no cleanup job needed. Same key convention as `otp:` (this file, OTP Service)
+and `oauth_state:` (`github.service.ts`). See `decisions/006-redis-for-refresh-tokens.md` for
+the reasoning — this replaced an earlier `RefreshToken` Postgres model whose `expiresAt` column
+was written but never actually read (expiry was always enforced by the JWT itself).
+`findByToken` returns only `{ userId }` — no synthetic row id, since nothing ever consumed one.
+
 ---
 
 ### GET /github/oauth/url
