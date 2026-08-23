@@ -148,6 +148,19 @@ CREATE INDEX idx_refresh_token_user ON "RefreshToken"("userId");
 ```
 
 ## Migrations
-- [ ] 001_init — baseline schema above
+- [x] 001_init (`20260823095713_init`) — baseline schema above, applied 2026-08-23. Ran as one
+  migration since `ProcessedStripeEvent` was already part of the schema by the time the first
+  migration was ever created (billing module landed before this database was first migrated) —
+  003 below is already covered, not a separate step.
 - [ ] 002_indexes — indexes listed above
-- [ ] 003_processed_stripe_events — ProcessedStripeEvent table (idempotency)
+- ~~003_processed_stripe_events~~ — covered by 001_init, see above
+
+## Prisma version
+`packages/db` runs Prisma 7 (`prisma`/`@prisma/adapter-pg`/`@prisma/client-runtime-utils`
+`^7.9.1`) via the `pg` driver adapter, not the classic Rust-engine client — schema.prisma's
+`datasource` block has no `url` (removed in Prisma 7; see `.ai/memory/pitfalls.md` #013),
+connection config lives in `packages/db/prisma.config.ts` (CLI) and
+`packages/db/src/index.ts` (runtime, via `PrismaPg`). Generated client output is pinned to
+`packages/db/generated/client` (`generator client { output = ... }`) instead of the default
+hashed `node_modules/.pnpm/...` path, so Docker builds can copy it between stages by a stable
+path.

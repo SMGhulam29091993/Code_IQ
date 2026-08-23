@@ -127,8 +127,15 @@
 - Domain: `knowledge/domains/billing.md` ✓ (Implementation notes section added)
 
 ## Step 7 — Deploy [ in-progress ]
-- [x] Dockerfile for apps/api — multi-stage (`turbo prune` → pnpm install → build → prod-only
-  install → non-root runtime), built and run-verified against the compose network
+- [x] Dockerfile for apps/api — multi-stage (`turbo prune` → build stage (full install + `tsc`/
+  `prisma generate`) → separate `installer` stage (fresh prod-only install, never touches
+  devDependencies) → non-root runtime), built and run-verified against the compose network,
+  317MB
+- [x] Migrated `packages/db` from Prisma 5 (Rust-engine client, `env("DATABASE_URL")` in
+  schema) to Prisma 7 (`pg` driver adapter via `@prisma/adapter-pg`, `prisma.config.ts`) — see
+  `memory/pitfalls.md` #013–#015. Not originally scoped for this step, but the reference
+  pattern (TeamPulse, a sibling project) made the case for adopting it now rather than
+  carrying the older setup forward.
 - [x] Dockerfile for apps/web — same `turbo prune` pattern, Next.js `output: "standalone"`
   (added to `next.config.js`), built and run-verified
 - [x] docker-compose.yml (postgres + redis + api + web) — `api`/`web` build from the Dockerfiles
@@ -148,12 +155,20 @@
   `main`/`types` point there instead of `./src/index.ts`.
 - `apps/api/Dockerfile` needs `node:22-alpine` (not `20-alpine`) — the pinned `packageManager:
   pnpm@11.1.2` in the root `package.json` requires Node ≥22.13 and fails under corepack on Node 20.
-- `apps/api`'s alpine build stage needs `python3 make g++` (bcrypt's native addon, built via
-  node-pre-gyp/node-gyp — no prebuilt musl/arm64 binary is fetched) and `openssl` (Prisma's query
-  engine on Alpine). The runtime stage only needs `openssl`.
-- `pnpm install --prod --frozen-lockfile` (dropping dev deps in the final `api` build stage) needs
-  `ENV CI=true` — pnpm refuses to purge `node_modules` non-interactively otherwise
-  (`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`).
+- `apps/api`'s alpine stages need `python3 make g++` (bcrypt's native addon, built via
+  node-pre-gyp/node-gyp — no prebuilt musl/arm64 binary is fetched). `openssl` was needed for
+  Prisma 5's Rust query engine but is no longer required after the Prisma 7 driver-adapter
+  migration (no native engine binary ships anymore) — see `memory/pitfalls.md` #013.
+- `pnpm install --prod --frozen-lockfile`, run in the *same* directory as an earlier full
+  install, does not shrink the image — it only removes `node_modules/` symlinks, not the
+  already-fetched devDependency content sitting in the local `.pnpm` virtual store. Needed a
+  dedicated `installer` stage with a fresh install instead — see `memory/pitfalls.md` #015.
+  (Also still needs `ENV CI=true` in that stage — pnpm refuses to purge `node_modules`
+  non-interactively otherwise, `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`.)
+- Prisma Client's generated output is pinned to `packages/db/generated/client` (`generator
+  client { output = ... }`) instead of the default hashed `node_modules/.pnpm/...` path — lets
+  the Dockerfile copy it between stages by a stable path. Matches a pre-existing (previously
+  unused) `packages/db/generated/` entry in the root `.gitignore`.
 - `apps/web` has no `public/` directory yet — the Dockerfile doesn't copy one; add that `COPY` back
   if/when one is added.
 - AWS provisioning is out of scope for local tooling — real infra, needs separate access/authorization.
