@@ -1,11 +1,17 @@
 // Source of truth: .ai/plans/database.md. Update that file in the same change as this schema.
+// Fixed, non-hashed output path (vs. the default node_modules/.pnpm/<hash>/... location) so
+// the Docker build can copy the generated client between stages by a stable path. Matches the
+// pre-existing packages/db/generated/ entry in the root .gitignore.
 generator client {
   provider = "prisma-client-js"
+  output   = "../generated/client"
 }
 
+// Connection URL lives in prisma.config.ts (Migrate/CLI) and is passed via the pg driver
+// adapter to the PrismaClient constructor (runtime) — Prisma 7 removed `url` from this block.
+// See https://pris.ly/d/config-datasource
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 model User {
