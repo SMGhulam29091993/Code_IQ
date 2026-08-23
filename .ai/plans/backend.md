@@ -126,10 +126,34 @@
   clean for `@codeiq/api`.
 - Domain: `knowledge/domains/billing.md` ✓ (Implementation notes section added)
 
-## Step 7 — Deploy [ not-started ]
-- [ ] Dockerfile for apps/api
-- [ ] docker-compose.yml (postgres + redis + api + web)
+## Step 7 — Deploy [ in-progress ]
+- [x] Dockerfile for apps/api — multi-stage (`turbo prune` → pnpm install → build → prod-only
+  install → non-root runtime), built and run-verified against the compose network
+- [x] Dockerfile for apps/web — same `turbo prune` pattern, Next.js `output: "standalone"`
+  (added to `next.config.js`), built and run-verified
+- [x] docker-compose.yml (postgres + redis + api + web) — `api`/`web` build from the Dockerfiles
+  above; `api` gets DB/Redis URLs pointed at the compose service hostnames, everything else
+  from `.env` via `env_file`
+- [x] Health check endpoint: `GET /health` — outside `/api`, pings both Prisma (`SELECT 1`) and
+  Redis (`ping()`), 200/503
 - [ ] AWS EC2 + RDS + ElastiCache setup
 - [ ] GitHub App webhook URL → production domain
 - [ ] Env vars loaded from AWS Secrets Manager
-- [ ] Health check endpoint: `GET /health`
+
+**Implementation notes (discovered during this step):**
+- Fixed a real production-build bug surfaced by actually running `pnpm build && node dist/server.js`
+  for the first time (dev always used `tsx watch`, which never hit it): `packages/db` and
+  `packages/types` compiled to ESM while `apps/api` compiles to CJS, and had no `build` script —
+  see `memory/pitfalls.md` #012. Both packages now build to `dist/` (CJS, matching `apps/api`) and
+  `main`/`types` point there instead of `./src/index.ts`.
+- `apps/api/Dockerfile` needs `node:22-alpine` (not `20-alpine`) — the pinned `packageManager:
+  pnpm@11.1.2` in the root `package.json` requires Node ≥22.13 and fails under corepack on Node 20.
+- `apps/api`'s alpine build stage needs `python3 make g++` (bcrypt's native addon, built via
+  node-pre-gyp/node-gyp — no prebuilt musl/arm64 binary is fetched) and `openssl` (Prisma's query
+  engine on Alpine). The runtime stage only needs `openssl`.
+- `pnpm install --prod --frozen-lockfile` (dropping dev deps in the final `api` build stage) needs
+  `ENV CI=true` — pnpm refuses to purge `node_modules` non-interactively otherwise
+  (`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`).
+- `apps/web` has no `public/` directory yet — the Dockerfile doesn't copy one; add that `COPY` back
+  if/when one is added.
+- AWS provisioning is out of scope for local tooling — real infra, needs separate access/authorization.
