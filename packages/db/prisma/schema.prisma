@@ -25,20 +25,14 @@ model User {
   githubAccessToken String? // encrypted at rest
   lastLoginAt       DateTime?
   installations     Installation[]
-  refreshTokens     RefreshToken[]
   otp               Otp?
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 }
 
-model RefreshToken {
-  id        String   @id @default(cuid())
-  token     String   @unique
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-  expiresAt DateTime
-}
+// Refresh tokens live in Redis, not Postgres (see apps/api/src/modules/auth/
+// refresh-token.repository.ts) — the token itself carries userId as a Redis value with a TTL
+// matching its JWT expiry, so there's no DB row to model here anymore.
 
 // One active OTP per user — upserted on each register/resend. See .ai/knowledge/domains/auth.md.
 model Otp {

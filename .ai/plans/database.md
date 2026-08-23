@@ -14,20 +14,13 @@ model User {
   githubAccessToken String?        // encrypted at rest
   lastLoginAt      DateTime?
   installations    Installation[]
-  refreshTokens    RefreshToken[]
   otp              Otp?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 }
 
-model RefreshToken {
-  id        String   @id @default(cuid())
-  token     String   @unique
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-  expiresAt DateTime
-}
+// Refresh tokens are Redis-backed, not a Postgres model — see decisions/006-redis-for-refresh-tokens.md
+// and apps/api/src/modules/auth/refresh-token.repository.ts.
 
 // One active OTP per user, upserted on each register/resend — knowledge/domains/auth.md "OTP Service"
 model Otp {
@@ -144,7 +137,6 @@ CREATE INDEX idx_review_repo_status ON "Review"("repoId", "status");
 CREATE INDEX idx_review_issue_review ON "ReviewIssue"("reviewId");
 CREATE INDEX idx_review_issue_severity ON "ReviewIssue"("severity");
 CREATE INDEX idx_repo_installation ON "Repo"("installationId");
-CREATE INDEX idx_refresh_token_user ON "RefreshToken"("userId");
 ```
 
 ## Migrations
@@ -152,8 +144,11 @@ CREATE INDEX idx_refresh_token_user ON "RefreshToken"("userId");
   migration since `ProcessedStripeEvent` was already part of the schema by the time the first
   migration was ever created (billing module landed before this database was first migrated) —
   003 below is already covered, not a separate step.
-- [ ] 002_indexes — indexes listed above
+- [ ] 002_indexes — indexes listed above (`idx_refresh_token_user` dropped from this list —
+  see 004 below)
 - ~~003_processed_stripe_events~~ — covered by 001_init, see above
+- [x] 004_drop_refresh_token_table (`20260823105451_drop_refresh_token_table`) — refresh
+  tokens moved to Redis, applied 2026-08-23. See `decisions/006-redis-for-refresh-tokens.md`.
 
 ## Prisma version
 `packages/db` runs Prisma 7 (`prisma`/`@prisma/adapter-pg`/`@prisma/client-runtime-utils`

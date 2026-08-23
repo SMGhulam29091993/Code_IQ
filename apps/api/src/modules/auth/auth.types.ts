@@ -67,7 +67,9 @@ export interface IUserRepository {
 
 export interface IRefreshTokenRepository {
   create(data: { userId: string; token: string; expiresAt: Date }): Promise<void>;
-  findByToken(token: string): Promise<{ id: string; userId: string } | null>;
+  // Redis-backed (refresh-token.repository.ts) — no synthetic row id, just the owning userId
+  // logout()'s ownership check needs.
+  findByToken(token: string): Promise<{ userId: string } | null>;
   deleteByToken(token: string): Promise<void>;
 }
 
