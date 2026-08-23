@@ -1,6 +1,29 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-08-23 (Frontend Step 2 — Auth screens)
+- Built login and register screens end to end: `(auth)/login/page.tsx` + `LoginForm.tsx`,
+  `(auth)/register/page.tsx` + `RegisterForm.tsx`, `components/providers/AuthProvider.tsx`,
+  `hooks/useAuth.ts`, `lib/password-strength.ts`, an `auth.store.ts` `rehydrate` action, and 42
+  new tests (store, hook, AuthProvider, both forms) — full detail and every discovered bug is in
+  `plans/frontend.md` Step 2 and `knowledge/screens/auth-screens.md`; not duplicating it here.
+  Headline items: `knowledge/screens/auth-screens.md`'s Register spec assumed `POST
+  /auth/register` returns tokens directly — it doesn't (two-step OTP flow) — so that pseudocode
+  would have shipped a screen that's broken against the real API; built the correct two-step
+  flow instead and fixed the doc. Actually ran the app in a headless browser (Playwright,
+  installed fresh — no `chromium-cli` in this environment) against the real backend, not just
+  the mocked test suite, which caught two real bugs neither typecheck nor mocks would have:
+  `apps/web/.env` never existed (only `.env.example`), and `lib/api.ts`'s response interceptor
+  was retrying-and-redirecting on *any* 401 including a failed login attempt itself, silently
+  turning "wrong password" into a hard navigation to `/login?reason=session_expired` that wiped
+  the form and the intended error banner. Also found the same root bug (react-hook-form's
+  `isSubmitting` not reflecting an un-awaited `mutation.mutate()` call) independently in both
+  forms via the component tests actually failing, not by inspection.
+  Not committed on its own branch yet — sitting in the working tree as of this entry. Full
+  `pnpm typecheck`/`lint`/`build`/`test` (42/42) clean for `@codeiq/web`, and the whole
+  monorepo's `build`/`typecheck`/`lint` + `@codeiq/api` test suite (274/274) re-verified clean
+  after the `packages/types` addition (`AuthTokensResult`, `RegisterResult`).
+
 ## 2026-08-23 (Auth: refresh tokens moved from Postgres to Redis)
 - Migrated `apps/api/src/modules/auth/refresh-token.repository.ts` off the Postgres
   `RefreshToken` table onto Redis — `refresh_token:<token>` → owning `userId`, TTL from

@@ -12,6 +12,10 @@ interface AuthState {
   refreshToken: string | null;
   isAuthenticated: boolean;
   login: (token: string, refreshToken: string, user: User) => void;
+  // AuthProvider-only: restores a session from localStorage on mount. No `user` param — there's
+  // no GET /auth/me endpoint yet to refetch it, so `user` stays whatever it already was (null on
+  // a fresh page load). isAuthenticated flips true on token presence alone.
+  rehydrate: (token: string, refreshToken: string) => void;
   setToken: (token: string) => void;
   logout: () => void;
 }
@@ -25,6 +29,9 @@ export const useAuthStore = create<AuthState>()((set) => ({
     localStorage.setItem("auth-token", token);
     localStorage.setItem("auth-refresh", refreshToken);
     set({ token, refreshToken, user, isAuthenticated: true });
+  },
+  rehydrate: (token, refreshToken) => {
+    set({ token, refreshToken, isAuthenticated: true });
   },
   setToken: (token) => {
     localStorage.setItem("auth-token", token);
