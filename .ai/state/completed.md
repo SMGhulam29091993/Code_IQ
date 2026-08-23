@@ -1,6 +1,44 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-08-23 (packages/db: Prisma 5 → 7 migration)
+- Migrated `packages/db` off Prisma 5's Rust-engine client onto Prisma 7's `pg` driver-adapter
+  pattern, on `docs/readme` (ad hoc fix mid-branch, not its own feature branch — see the
+  session's actual branch history for the real split). Prompted by two things: (1) the user
+  flagged the two-`.env` duplication (`apps/api/.env` + a new `packages/db/.env`) added to fix
+  `pnpm db:migrate`'s `DATABASE_URL not found` error (Prisma CLI runs with `packages/db` as its
+  cwd and never saw `apps/api/.env`), and (2) a reference implementation in a sibling project
+  (TeamPulse) already on Prisma 7 with a `prisma.config.ts` that solves exactly that
+  duplication.
+  Changes: `packages/db/prisma/schema.prisma`'s `datasource` block no longer has `url` (Prisma
+  7 removed it — hard schema-validation error otherwise); new `packages/db/prisma.config.ts`
+  loads `apps/api/.env` directly for CLI commands (migrate/studio) — no second `.env` needed
+  anymore, `packages/db/.env`/`.env.example` removed; `packages/db/src/index.ts` constructs the
+  client via `new PrismaPg({ connectionString: process.env.DATABASE_URL })` passed as the
+  `adapter` option, instead of a bare `new PrismaClient()`; `apps/api/src/server.ts` now
+  imports `"dotenv/config"` as its literal first statement (env must be loaded before anything
+  that transitively imports `@codeiq/db`, which now reads `process.env.DATABASE_URL`
+  synchronously at import time, not lazily at `$connect()` like before); Prisma Client's
+  generated output moved to a fixed path (`packages/db/generated/client`) instead of the
+  default hashed `node_modules/.pnpm/...` location.
+  Also created the actual first migration for this database (`20260823095713_init`) — the
+  schema had never been migrated against a real Postgres before this session, since the local
+  compose Postgres only recently became reachable (unrelated Docker Desktop port-forwarding
+  issue, fixed earlier this session).
+  Found two more real bugs verifying the Dockerfile still worked against Prisma 7: `generate`
+  doesn't need a live DB, but `prisma.config.ts` was throwing unconditionally on a missing
+  `DATABASE_URL`, which broke Docker builds (`apps/api/.env` is dockerignored on purpose) — see
+  `memory/pitfalls.md` #014; and `pnpm install --prod` doesn't garbage-collect devDependency
+  content already fetched into `node_modules/.pnpm` by an earlier full install in the same
+  directory, so the image hadn't actually shrunk (964MB) despite `--prod` reporting
+  devDependencies removed — fixed with a dedicated fresh-install stage, `memory/pitfalls.md`
+  #015. Net result: 317MB, down from the original Prisma-5 image's 664MB.
+  Full `pnpm turbo run build/typecheck/lint` and `pnpm --filter @codeiq/api test` (274/274)
+  clean throughout. Verified for real, not just typechecked: live `/health` through the
+  rebuilt Docker container over the compose network, and a real `POST /api/auth/register`
+  round-trip that wrote a `User` row to Postgres through the new adapter-based client.
+  `.ai/plans/database.md`, `.ai/plans/backend.md`, `.ai/memory/pitfalls.md` updated.
+
 ## 2026-08-23 (Step 7, partial)
 - Backend Step 7 (Deploy) local-tooling pieces complete, on `feat/billing-module`.
   `apps/api/Dockerfile` and `apps/web/Dockerfile`: multi-stage `turbo prune @codeiq/<app>

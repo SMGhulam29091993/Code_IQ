@@ -11,27 +11,36 @@ WORKDIR /app
 COPY . .
 RUN npx turbo prune @codeiq/api --docker
 
-# ---- Install + build: install pruned deps, generate Prisma client, compile TS ----
+# ---- Build: full (dev+prod) install, generate Prisma client, compile TS ----
 FROM base AS builder
 WORKDIR /app
-RUN apk add --no-cache python3 make g++ openssl
+RUN apk add --no-cache python3 make g++
 COPY --from=pruner /app/out/json/ .
 COPY --from=pruner /app/pnpm-lock.yaml ./pnpm-lock.yaml
 RUN pnpm install --frozen-lockfile
 COPY --from=pruner /app/out/full/ .
 RUN pnpm turbo run build --filter=@codeiq/api
 
-# Drop dev dependencies (build tools, TS, test libs, prisma CLI) — keep only what's
-# needed to run dist/server.js, including the Prisma client generated above.
+# ---- Install: separate, prod-only install in a clean tree. `pnpm install --prod` in the
+# builder stage above removes devDependency *symlinks* but not their content already fetched
+# into node_modules/.pnpm — a fresh install here never fetches them in the first place. ----
+FROM base AS installer
+WORKDIR /app
+RUN apk add --no-cache python3 make g++
+COPY --from=pruner /app/out/json/ .
+COPY --from=pruner /app/pnpm-lock.yaml ./pnpm-lock.yaml
 RUN pnpm install --prod --frozen-lockfile
+COPY --from=builder /app/apps/api/dist ./apps/api/dist
+COPY --from=builder /app/packages/db/dist ./packages/db/dist
+COPY --from=builder /app/packages/db/generated ./packages/db/generated
+COPY --from=builder /app/packages/types/dist ./packages/types/dist
 
 # ---- Runtime: minimal image, non-root user ----
 FROM base AS runner
-RUN apk add --no-cache openssl
 WORKDIR /app
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 expressjs
 
-COPY --from=builder --chown=expressjs:nodejs /app .
+COPY --from=installer --chown=expressjs:nodejs /app .
 
 USER expressjs
 EXPOSE 4000
