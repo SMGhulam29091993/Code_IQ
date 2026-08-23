@@ -96,12 +96,8 @@ export const handlers: HttpHandler[] = [
       data: { reviews: [mockReviewSummary], total: 1, page: 1, totalPages: 1 },
     })
   ),
-  http.get("/api/reviews/:reviewId", () =>
-    HttpResponse.json({ success: true, message: "Success", data: mockReview })
-  ),
-  http.post("/api/reviews/:reviewId/retry", () =>
-    HttpResponse.json({ success: true, message: "Success", data: mockReview })
-  ),
+  // Must be registered before the /api/reviews/:reviewId handler below — MSW matches path
+  // params against literal segments too, so ":reviewId" would otherwise swallow "stats" first.
   http.get("/api/reviews/stats", () =>
     HttpResponse.json({
       success: true,
@@ -114,6 +110,12 @@ export const handlers: HttpHandler[] = [
         recentTrend: [],
       },
     })
+  ),
+  http.get("/api/reviews/:reviewId", () =>
+    HttpResponse.json({ success: true, message: "Success", data: mockReview })
+  ),
+  http.post("/api/reviews/:reviewId/retry", () =>
+    HttpResponse.json({ success: true, message: "Success", data: mockReview })
   ),
 
   http.get("/api/billing/plans", () =>

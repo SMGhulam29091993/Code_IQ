@@ -12,6 +12,19 @@
 
 ## Screen: Overview `/overview`
 
+> **Mockup note (2026-08-23):** the mockup's 4 stat cards are "Reviews this week" (+12%),
+> "Issues found" (+31), "Median review" (47s, -6s), "Failed reviews" (3, "2 retried") — none of
+> which `GET /reviews/stats` can answer (no week-over-week delta, no review duration field, no
+> retry count). Keeping this doc's original 4 cards below (Total Reviews / Issues Found /
+> Critical Issues / Active Repos) since they map directly onto the real response shape
+> (`knowledge/domains/review.md`) plus `GET /repos`'s active count — no delta badges, since
+> there's no historical comparison data to show one honestly (not a placeholder "--").
+> `PendingActionItems` and `QuickAsk` below aren't in the mockup at all; `QuickAsk` stays
+> documented-but-not-built ("future"), `PendingActionItems` is cut from this pass (no mockup
+> reference and no distinct data source beyond what `RecentReviewsList` already shows) — replaced
+> by `IssuesByCategory` (mockup's category-breakdown panel, backed by the real
+> `issuesByCategory` field).
+
 ### Components
 ```
 (dashboard)/overview/
@@ -19,10 +32,9 @@
 ├── loading.tsx                      ← <OverviewSkeleton />
 ├── error.tsx                        ← <ErrorBanner />
 └── _components/
-    ├── StatsGrid.tsx                ← 4 stat cards
+    ├── StatsGrid.tsx                ← 4 stat cards, no delta (see mockup note above)
     ├── RecentReviewsList.tsx        ← last 5 reviews
-    ├── PendingActionItems.tsx       ← open action items from reviews
-    └── QuickAsk.tsx                 ← inline RAG chat input (future)
+    └── IssuesByCategory.tsx         ← category breakdown bars, from issuesByCategory
 ```
 
 ### Acceptance criteria
