@@ -390,7 +390,6 @@ describe("AuthService", () => {
   describe("refresh", () => {
     it("returns a new access token for a valid refresh token", async () => {
       (refreshTokenRepo.findByToken as ReturnType<typeof vi.fn>).mockResolvedValue({
-        id: "rt-1",
         userId: "user-1",
       });
       (userRepo.findById as ReturnType<typeof vi.fn>).mockResolvedValue(buildUser());
@@ -430,7 +429,6 @@ describe("AuthService", () => {
 
     it("throws when the user linked to the token no longer exists", async () => {
       (refreshTokenRepo.findByToken as ReturnType<typeof vi.fn>).mockResolvedValue({
-        id: "rt-1",
         userId: "user-1",
       });
       (userRepo.findById as ReturnType<typeof vi.fn>).mockResolvedValue(null);
@@ -444,7 +442,6 @@ describe("AuthService", () => {
   describe("logout", () => {
     it("deletes the refresh token on success", async () => {
       (refreshTokenRepo.findByToken as ReturnType<typeof vi.fn>).mockResolvedValue({
-        id: "rt-1",
         userId: "user-1",
       });
 
@@ -462,7 +459,6 @@ describe("AuthService", () => {
 
     it("throws ForbiddenError when the token belongs to a different user", async () => {
       (refreshTokenRepo.findByToken as ReturnType<typeof vi.fn>).mockResolvedValue({
-        id: "rt-1",
         userId: "someone-else",
       });
 

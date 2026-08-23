@@ -1,6 +1,29 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-08-23 (Auth: refresh tokens moved from Postgres to Redis)
+- Migrated `apps/api/src/modules/auth/refresh-token.repository.ts` off the Postgres
+  `RefreshToken` table onto Redis — `refresh_token:<token>` → owning `userId`, TTL from
+  `refreshTokenExpiry()` (7 days) instead of a manually-checked `expiresAt` column. Same
+  `<domain>:<opaque-id>` key convention already used by `otp:` and `oauth_state:`. New ADR:
+  `decisions/006-redis-for-refresh-tokens.md`.
+  Prompted by the user asking why the table existed at all, then asking to move that logic to
+  Redis — the table was purely a revocation check (`findByToken` on refresh, `deleteByToken`
+  on logout) with an `expiresAt` column that was written but never read (expiry was always
+  enforced by the JWT's own `exp` claim), so it was a natural fit for the same TTL-based Redis
+  pattern the OTP flow already used.
+  `IRefreshTokenRepository.findByToken` narrowed from `{ id, userId }` to `{ userId }` — the
+  synthetic row id was carried over from the Postgres shape but never consumed by any caller.
+  Dropped the `RefreshToken` Prisma model (migration `20260823105451_drop_refresh_token_table`)
+  and its `idx_refresh_token_user` entry from `plans/database.md`'s indexes list.
+  `apps/api/src/__tests__/auth.service.test.ts` and `auth.routes.test.ts` updated to match (mock
+  shapes only — no test cases added or removed, 274/274 still pass). Verified for real: a live
+  register → login → refresh → logout → refresh-after-logout sequence against actual
+  Postgres/Redis, both via `tsx` and inside the rebuilt Docker container — confirmed the
+  `refresh_token:` key's TTL is exactly 604800s and that logout genuinely revokes it (post-logout
+  refresh correctly returns 401 "Refresh token revoked").
+  `knowledge/domains/auth.md`, `plans/backend.md` (Step 2), `plans/database.md` updated.
+
 ## 2026-08-23 (packages/db: Prisma 5 → 7 migration)
 - Migrated `packages/db` off Prisma 5's Rust-engine client onto Prisma 7's `pg` driver-adapter
   pattern, on `docs/readme` (ad hoc fix mid-branch, not its own feature branch — see the
