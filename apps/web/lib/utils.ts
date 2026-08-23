@@ -14,6 +14,13 @@ export function getApiErrorMessage(err: unknown): string | undefined {
   return undefined;
 }
 
+export function getApiErrorStatus(err: unknown): number | undefined {
+  if (typeof err === "object" && err !== null && "response" in err) {
+    return (err as { response?: { status?: number } }).response?.status;
+  }
+  return undefined;
+}
+
 export function getErrorMessage(err: unknown): string {
   if (typeof err === "object" && err !== null && "response" in err) {
     const hasResponse = (err as { response?: unknown }).response !== undefined;
