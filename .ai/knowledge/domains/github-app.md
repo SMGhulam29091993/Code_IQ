@@ -322,3 +322,20 @@ export const getInstallationOctokit = async (githubInstallationId: number) => {
   spec lives in `knowledge/domains/auth.md`) are distinct from `GITHUB_APP_ID` /
   `GITHUB_APP_PRIVATE_KEY` (installation-token auth for repo/PR access, this file). Both pairs
   belong to the same GitHub App registration but are never interchangeable.
+- **A real GitHub App is registered** under `GITHUB_APP_ID=4689964` (name "CodeIQ29091993",
+  **slug `codeiq29091993`** — confirmed 2026-08-25 via `GET /app` with the app's own JWT, since
+  `apps/web/.env`'s `NEXT_PUBLIC_GITHUB_APP_SLUG` had drifted to an unverified placeholder
+  (`codeiq-dev`) that 404s on `github.com/apps/codeiq-dev/installations/new` — the Onboarding
+  screen's "Install the GitHub App" button was silently broken. Fixed in `apps/web/.env`. The
+  slug is not a secret (it's the public last path segment of the app's own install-page URL, same
+  visibility as the app's name), so it's also hardcoded as a docker-compose build arg
+  (`apps/api/docker-compose.yml`) rather than sourced from a gitignored `.env` — see the next
+  note for why that build arg needs to exist at all.
+- **`apps/web/Dockerfile` was missing the `NEXT_PUBLIC_GITHUB_APP_SLUG` build arg entirely** (only
+  `NEXT_PUBLIC_API_URL` was threaded through). Next.js inlines `NEXT_PUBLIC_*` vars into the
+  client bundle at *build* time, not read at runtime — an unset one doesn't error, it just bakes
+  in the literal string `"undefined"`, so the containerized build's install link was
+  `https://github.com/apps/undefined/installations/new` regardless of what `apps/web/.env` said
+  on the host. Fixed by adding the `ARG`/`ENV` pair to the Dockerfile and the build arg to
+  `docker-compose.yml`; needs an image rebuild (`docker compose build web`) to take effect on an
+  already-built container.
