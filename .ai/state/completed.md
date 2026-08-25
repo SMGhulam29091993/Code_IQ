@@ -1,6 +1,65 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-08-25 (Frontend Step 9 — Polish)
+- User asked to verify the dashboard UI + APIs were complete, then to "start building" — Step 9
+  (Polish) was the one remaining `not-started` item in `plans/frontend.md`, so built it in full:
+  root error boundaries, Framer Motion page transitions, a keyboard-nav audit, an axe-core
+  accessibility pass, and mobile responsiveness at 375px. Frontend-only — no backend changes.
+  1. **`app/error.tsx` + `app/global-error.tsx`** — no route segment above the individual
+     `(dashboard)/*` pages had an error boundary before this, so (auth)/login,
+     (auth)/register, and root "/" had none. `global-error.tsx` renders its own `<html>/<body>`
+     (Next.js requirement — it replaces the root layout on error) with inline styles, since
+     next/font variables and Tailwind classes aren't available at that point.
+  2. **`components/providers/PageTransition.tsx`** — framer-motion fade+rise keyed by pathname,
+     wraps `(dashboard)/layout.tsx`'s `{children}`; respects `prefers-reduced-motion` via
+     `useReducedMotion` (collapses to an instant, motion-free swap rather than skipping the
+     wrapper, so layout stays identical either way). `framer-motion` was already a dependency,
+     unused until now.
+  3. **Mobile responsiveness** — `Sidebar.tsx` gained an optional `onNavigate` prop;
+     `(dashboard)/layout.tsx` rebuilt around it: below `lg`, the sidebar becomes a fixed
+     off-canvas drawer (slide-in, backdrop, Escape-to-close, auto-closes on navigation) behind a
+     hamburger button in a mobile-only top bar, replacing the always-visible 224px column that
+     made every screen unusable under ~1024px. Repos List and Reviews List's 5-column tables
+     wrapped in `overflow-x-auto` + `min-w-[640px]` so they scroll instead of crushing
+     illegibly. Every two-column panel built in Steps 4–7 (StatsGrid, RepoConfigPanel,
+     ReviewDetailContent's file rail, BillingContent, PlanCards, RepoInsightsPanel) already had
+     a `grid-cols-1` mobile fallback — nothing to change there.
+  4. **Keyboard-nav audit** — found `DangerZone`'s inline confirm dialog (a plain div, not a
+     native `<dialog>`) had no focus management: added focus-on-open (moves to Cancel) and
+     Escape-to-close; the new mobile drawer got the same Escape handling. Everything else
+     audited was already keyboard-operable from Steps 3–7 (custom row components use
+     `role="button"` + `tabIndex` + Enter-to-activate + `aria-label`; `Button` already had a
+     visible `focus-visible` ring).
+  5. **axe-core pass** — registered `jest-axe`'s `toHaveNoViolations` matcher globally in
+     `vitest.setup.ts`, added one `axe(container)` test to each of the 9 screen-level test
+     files. Found 2 real violations, not just passing tests: `RepoConfigPanel`'s two toggle
+     switches had no accessible name (`aria-label` added); `RepoCard`'s row was `role="button"`
+     wrapping a real `<button>` toggle — a "nested-interactive" violation. Fixed by wrapping only
+     the navigable cells in a `<button className="contents">` (drops out of the CSS Grid box
+     model so its children still lay out as direct grid items) so the toggle is a sibling, not a
+     descendant — updated the one `ReposList.test.tsx` case that queried the toggle as a DOM
+     descendant of the row to match. New dev dependency: `@types/jest-axe` (`jest-axe` itself
+     had no type declarations, which broke `next build`'s type-check step once
+     `vitest.setup.ts` imported it — invisible to `vitest` itself, which doesn't type-check).
+  96/96 `@codeiq/web` tests, monorepo-wide `pnpm turbo run typecheck lint build test` clean
+  (311/311 `@codeiq/api` unaffected). **Live browser verification**: found the running
+  `api-api-1` Docker container predated Step 8 (404 on `/auth/me`, 500 on `/reviews/stats`),
+  stopped it and ran `apps/api` via its own `pnpm dev` instead (same pattern as prior sessions);
+  seeded a second throwaway user directly into Postgres (`verify@codeiq.dev`'s password was
+  changed by Step 8's own live test and is no longer `TestPass123!`); drove the app with a fresh
+  Playwright install (scratchpad, not the repo) at 375px and 1440px — mobile drawer open/close/
+  Escape/auto-close-on-nav, tables scrolling instead of crushing, desktop layout unchanged, a
+  temporary throwing test route (added, screenshotted, then deleted) confirming `app/error.tsx`
+  renders correctly, and the DangerZone focus/Escape behavior. Also hit and diagnosed a Next.js
+  14 dev-server flake unrelated to this change (rapid client-side navigation right after a fresh
+  `.next` boot intermittently 404s a route that compiles and serves fine on retry after a clean
+  `.next` rebuild) — not a regression, just dev-mode route-cache flakiness. No console/page
+  errors beyond the two already-documented sandbox-credential gaps (`GET /billing/subscription`
+  400s with no real Stripe subscription; `GET /billing/seats` 502s with no real GitHub App
+  installation to query). `.ai/plans/frontend.md` Step 9 marked complete; `state/current.md`
+  updated, including the stale-password correction above.
+
 ## 2026-08-23 (Mockup-fidelity pass — sidebar, headers, tables, real Overview widgets)
 - User pushback ("you are still missing a lot of details") after Step 8, with a screenshot of
   the mockup's Design Notes screen — its sidebar showing a footer (installation switcher + user

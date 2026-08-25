@@ -151,28 +151,73 @@
   shipped in one session, screen by screen, each committed separately. 77/77 frontend tests,
   296/296 backend tests, clean typecheck/lint/build on both apps.
 
-## Step 8 — Account & Workspace settings [ not-started ]
+## Step 8 — Account & Workspace settings [ complete ]
 > Not part of the mockup — added per explicit user request for "account management" after
 > Step 7. Covers both meanings raised: personal profile (new) and workspace/installation
 > settings (previously spec'd as `/workspace` in `billing-screens.md`, never built — see
 > `knowledge/screens/account-screens.md`, which now owns both as tabs of one `/account` route).
-- [ ] Backend first: `GET /auth/me`, `PATCH /auth/me`, `POST /auth/change-password`
+- [x] Backend first: `GET /auth/me`, `PATCH /auth/me`, `POST /auth/change-password`
   (`knowledge/domains/auth.md`) — nothing exposed a user's own profile before this
-- [ ] `(dashboard)/account/page.tsx`: 2 tabs (Profile / Workspace), same tabbed-page pattern as
+- [x] `(dashboard)/account/page.tsx`: 2 tabs (Profile / Workspace), same tabbed-page pattern as
   Repo Detail
-- [ ] `components/account/{AccountTabs,ProfileForm,ChangePasswordForm,WorkspacePanel,
+- [x] `components/account/{AccountTabs,ProfileForm,ChangePasswordForm,WorkspacePanel,
   DangerZone}.tsx`
-- [ ] `ChangePasswordForm` hidden entirely for GitHub-only accounts (`user.githubId` set) —
+- [x] `ChangePasswordForm` hidden entirely for GitHub-only accounts (`user.githubId` set) —
   matches the backend's own rejection of that case
-- [ ] Workspace tab reuses `DELETE /github/installations/:id` (already existed, never had a
+- [x] Workspace tab reuses `DELETE /github/installations/:id` (already existed, never had a
   frontend) — redirects to `/onboarding` on delete, not the old placeholder `/install`
-- [ ] `components/layout/Sidebar.tsx`: add "Account" nav item
+- [x] `components/layout/Sidebar.tsx`: add "Account" nav item
+- [x] Component test: `AccountTabs.test.tsx` (9)
+- Verified: `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm test` all pass for `@codeiq/web`;
+  live browser verification (profile edit, wrong/correct change-password, Workspace tab,
+  danger-zone confirm dialog) — see `state/completed.md` 2026-08-23 entry
 - Domain: `knowledge/domains/auth.md`, `knowledge/domains/github-app.md`
 - Screen: `knowledge/screens/account-screens.md`
 
-## Step 9 — Polish [ not-started ]
-- [ ] Framer Motion page transitions
-- [ ] Keyboard navigation audit
-- [ ] axe-core accessibility pass on every page
-- [ ] Mobile responsiveness (min-width: 375px)
-- [ ] Error boundary at root layout
+## Step 9 — Polish [ complete ]
+- [x] `app/error.tsx` (catches (auth) screens + root "/" — every (dashboard) screen already had
+  its own per-route error.tsx since Step 3–7) + `app/global-error.tsx` (catches errors inside
+  `app/layout.tsx` itself; must render its own `<html>/<body>` and can't rely on next/font
+  variables or Tailwind classes, so it's plain inline styles)
+- [x] `components/providers/PageTransition.tsx`: framer-motion fade+rise keyed by pathname,
+  wraps `{children}` inside `(dashboard)/layout.tsx`'s `<main>`; respects
+  `prefers-reduced-motion` via `useReducedMotion` (collapses to an instant swap, same layout)
+- [x] Mobile responsiveness (375px): `(dashboard)/layout.tsx` + `Sidebar.tsx` — sidebar becomes
+  an off-canvas drawer below `lg` (fixed, slide-in, backdrop, Escape-to-close, auto-closes on
+  navigation) behind a hamburger button in a mobile-only top bar, instead of the always-visible
+  224px column. Repos List and Reviews List's 5-column tables wrapped in `overflow-x-auto` +
+  `min-w-[640px]` so they scroll instead of crushing illegibly. Every two-column panel
+  (StatsGrid, RepoConfigPanel, ReviewDetailContent's file rail, BillingContent, PlanCards,
+  RepoInsightsPanel) already had a `grid-cols-1` mobile fallback from Steps 4–7 — no changes
+  needed there.
+- [x] Keyboard navigation audit: `DangerZone`'s inline confirm dialog now moves focus to Cancel
+  when it opens and closes on Escape (it's a plain div, not a native `<dialog>`, so neither was
+  automatic); the mobile nav drawer also closes on Escape. Everything else audited was already
+  keyboard-operable (custom row components use `role="button"` + `tabIndex` + Enter-to-activate
+  + `aria-label`; `Button` has a visible `focus-visible` ring) — see the axe pass below for what
+  the audit actually turned up beyond that.
+- [x] axe-core accessibility pass: `jest-axe`'s `toHaveNoViolations` matcher registered globally
+  in `vitest.setup.ts`; one `axe(container)` test added to each of the 9 screen-level test files
+  (Overview, Repos List, Reviews List, Review Detail, Billing, Account, Repo Config, Onboarding,
+  Login/Register forms). Found and fixed 2 real violations, not just added passing tests:
+  1. `RepoConfigPanel`'s two toggle switches (`role="switch"`) had no accessible name —
+     added `aria-label={s.label}`.
+  2. `RepoCard`'s row was `role="button"` wrapping a real `<button>` toggle — an axe
+     "nested-interactive" violation (screen readers can't sensibly represent a control inside a
+     control). Restructured: only the navigable cells are now wrapped in a `<button>` styled
+     with `contents` (drops out of the CSS Grid box model, so its children still lay out as
+     direct grid items) — the toggle button is a sibling, not a descendant. Updated the one
+     `ReposList.test.tsx` case that queried the toggle as a DOM descendant of the row.
+  New dev dependency: `@types/jest-axe` (`jest-axe` itself already existed but had no type
+  declarations, which broke `next build`'s type-check step once `vitest.setup.ts` imported it).
+- Verified: `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm test` (96/96) all pass for
+  `@codeiq/web`; monorepo-wide `pnpm turbo run typecheck lint build test` clean (all 5
+  packages). Live browser verification (Playwright, against a local `pnpm dev` API + a fresh
+  seeded user/installation/repos/reviews — the running `api-api-1` Docker container predated
+  Step 8 and 404'd on `/auth/me` and 500'd on `/reviews/stats`, so it was stopped for this pass,
+  same as prior sessions' pattern): mobile drawer open/close/Escape/auto-close-on-nav at 375px,
+  desktop sidebar unchanged at 1440px, repos/reviews tables scroll instead of crushing at 375px,
+  a temporary throwing test route confirmed `app/error.tsx` renders correctly (then deleted),
+  and the DangerZone focus-on-open + Escape-to-close behavior. No console/page errors beyond the
+  same two documented sandbox-credential gaps from prior sessions (no real Stripe subscription →
+  `GET /billing/subscription` 400s; no real GitHub App installation → `GET /billing/seats` 502s).
