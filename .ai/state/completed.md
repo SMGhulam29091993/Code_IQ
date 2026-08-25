@@ -1,6 +1,32 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-08-25 (Fix: Onboarding's "Install the GitHub App" 404'd)
+- User reported (with a screenshot of GitHub's own 404 page) that clicking "Install the GitHub
+  App" on Onboarding led nowhere real. Two stacked bugs, not one:
+  1. `apps/web/.env`'s `NEXT_PUBLIC_GITHUB_APP_SLUG` was an unverified placeholder
+     (`codeiq-dev`) that had never corresponded to a real registered app. Confirmed the *real*
+     app exists and is reachable — `GET /app` via the app's own JWT (built from the already-
+     configured `GITHUB_APP_ID`/`GITHUB_APP_PRIVATE_KEY`) returned slug `codeiq29091993`
+     (name "CodeIQ29091993", id 4689964). Fixed locally in `apps/web/.env`.
+  2. `apps/web/Dockerfile` never threaded `NEXT_PUBLIC_GITHUB_APP_SLUG` through as a build arg
+     at all (only `NEXT_PUBLIC_API_URL` was) — Next.js inlines `NEXT_PUBLIC_*` vars into the
+     client bundle at *build* time, so the containerized build's install link had literally
+     baked in the string `"undefined"`, regardless of the host's `.env`. This is almost
+     certainly what the user's own browser hit, since `api-web-1` is the container that
+     normally serves port 3000. Fixed by adding the `ARG`/`ENV` pair to the Dockerfile and the
+     (non-secret — a GitHub App's slug is public) build arg to `docker-compose.yml`.
+  Rebuilt both `api`/`web` Docker images against current source (this also brought `api-api-1`
+  current with Steps 8–9, and `api-web-1` current with the entire Step 3–9 frontend work it had
+  never seen) and restarted them; no local `pnpm dev` processes left running afterward.
+  **Verified end-to-end, not just by reasoning about the fix**: grepped the rebuilt container's
+  `.next/static` chunks to confirm `codeiq29091993` is present and `codeiq-dev` is gone, then
+  drove a real click through a fresh Playwright browser against `localhost:3000` (a throwaway
+  DB user with no installation, so Onboarding's step 1 renders) and confirmed the button
+  navigates to the real `https://github.com/apps/codeiq29091993/installations/new`.
+  `.ai/knowledge/domains/github-app.md` updated with the real app's identity and both root
+  causes, so this doesn't get rediscovered from scratch next time.
+
 ## 2026-08-25 (Frontend Step 9 — Polish)
 - User asked to verify the dashboard UI + APIs were complete, then to "start building" — Step 9
   (Polish) was the one remaining `not-started` item in `plans/frontend.md`, so built it in full:

@@ -21,17 +21,18 @@ before each part was built. See `state/completed.md` for the full breakdown and
 `plans/frontend.md` Steps 3–9 for per-screen/step detail.
 
 ## Local dev environment note
-The `api-api-1` Docker container was again found running-but-stale at the start of this session
-(it predated Step 8 — 404'd on `GET /auth/me`, 500'd on `GET /reviews/stats`) and was stopped in
-favor of `apps/api`'s own `pnpm dev` (`tsx watch`) for Step 9's browser verification, same
-pattern as before. Rebuild it (`cd apps/api && docker compose build api && docker compose up -d`)
-before relying on it again. Postgres/Redis containers were left running throughout. The
-`verify@codeiq.dev` seed account's password is **no longer `TestPass123!`** — it was changed
-during Step 8's own live change-password verification pass and never reset; a login attempt this
-session confirmed the old password no longer works. A second seed user was created for this
-session's verification instead (`step9check@codeiq.dev` / `TestPass123!`, installation
-`step9-org`, 2 repos, 2 reviews, 1 issue) — both accounts' data are harmless leftovers, useful
-for exploring the dashboard locally.
+Both Docker containers were rebuilt and are current as of this session's end (previously
+`api-api-1` predated Step 8 — 404'd on `GET /auth/me`, 500'd on `GET /reviews/stats` — and
+`api-web-1` predated Steps 8–9 *and* never had `NEXT_PUBLIC_GITHUB_APP_SLUG` threaded through its
+build at all, see the Onboarding-link fix above). `docker compose build api web && docker compose
+up -d api web` was run against the current source; both are now live on their usual ports
+(4000/3000) with fresh code. No local `pnpm dev` processes were left running. Postgres/Redis
+containers were left running throughout, unchanged. The `verify@codeiq.dev` seed account's
+password is **no longer `TestPass123!`** — it was changed during Step 8's own live
+change-password verification pass and never reset; a login attempt this session confirmed the
+old password no longer works. A second seed user exists from this session's verification instead
+(`step9check@codeiq.dev` / `TestPass123!`, installation `step9-org`, 2 repos, 2 reviews, 1
+issue) — both accounts' data are harmless leftovers, useful for exploring the dashboard locally.
 
 ## Active plan step
 `plans/frontend.md` → Steps 3–9 [ complete ]
