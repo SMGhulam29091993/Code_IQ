@@ -96,35 +96,39 @@ export const ReposList: FC = () => {
 
           {planLimitHit && <PlanLimitBanner />}
 
-          <div className="overflow-hidden rounded-card border border-border bg-surface">
-            {!isLoading && repos && repos.length > 0 && <RepoTableHeader />}
-            {isLoading && [1, 2, 3, 4].map((i) => <RepoCardSkeleton key={i} />)}
+          {/* min-w keeps the 5-column table legible on narrow viewports by scrolling instead of
+              crushing every column — see .ai/plans/frontend.md Step 9 "Mobile responsiveness". */}
+          <div className="overflow-x-auto rounded-card border border-border bg-surface">
+            <div className="min-w-[640px]">
+              {!isLoading && repos && repos.length > 0 && <RepoTableHeader />}
+              {isLoading && [1, 2, 3, 4].map((i) => <RepoCardSkeleton key={i} />)}
 
-            {!isLoading && displayed?.length === 0 && repos && repos.length > 0 && (
-              <div className="py-12 text-center text-sm text-text3">
-                No repos matching your search
-              </div>
-            )}
+              {!isLoading && displayed?.length === 0 && repos && repos.length > 0 && (
+                <div className="py-12 text-center text-sm text-text3">
+                  No repos matching your search
+                </div>
+              )}
 
-            {!isLoading && repos?.length === 0 && (
-              <div className="py-12 text-center text-sm text-text3">
-                Connect GitHub to see your repos
-              </div>
-            )}
+              {!isLoading && repos?.length === 0 && (
+                <div className="py-12 text-center text-sm text-text3">
+                  Connect GitHub to see your repos
+                </div>
+              )}
 
-            {!isLoading &&
-              displayed?.map((repo) => (
-                <RepoCard
-                  key={repo.id}
-                  repo={repo}
-                  onToggle={() => handleToggle(repo.id, repo.isActive)}
-                  isToggling={
-                    (activateMutation.isPending && activateMutation.variables === repo.id) ||
-                    (deactivateMutation.isPending && deactivateMutation.variables === repo.id)
-                  }
-                  overFreeLimit={overFreeLimitBool}
-                />
-              ))}
+              {!isLoading &&
+                displayed?.map((repo) => (
+                  <RepoCard
+                    key={repo.id}
+                    repo={repo}
+                    onToggle={() => handleToggle(repo.id, repo.isActive)}
+                    isToggling={
+                      (activateMutation.isPending && activateMutation.variables === repo.id) ||
+                      (deactivateMutation.isPending && deactivateMutation.variables === repo.id)
+                    }
+                    overFreeLimit={overFreeLimitBool}
+                  />
+                ))}
+            </div>
           </div>
         </div>
       )}

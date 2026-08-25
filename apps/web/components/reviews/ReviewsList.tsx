@@ -94,38 +94,44 @@ export const ReviewsList: FC = () => {
             onRepoChange={(r) => updateFilter({ repoId: r })}
           />
 
-          <div className="overflow-hidden rounded-card border border-border bg-surface">
-            {!isLoading && data && data.reviews.length > 0 && <ReviewTableHeader />}
-            {isLoading && [1, 2, 3, 4, 5, 6].map((i) => <ReviewTableRowSkeleton key={i} />)}
+          {/* min-w keeps the 5-column table legible on narrow viewports by scrolling instead of
+              crushing every column — see .ai/plans/frontend.md Step 9 "Mobile responsiveness". */}
+          <div className="overflow-x-auto rounded-card border border-border bg-surface">
+            <div className="min-w-[640px]">
+              {!isLoading && data && data.reviews.length > 0 && <ReviewTableHeader />}
+              {isLoading && [1, 2, 3, 4, 5, 6].map((i) => <ReviewTableRowSkeleton key={i} />)}
 
-            {!isLoading && data?.reviews.length === 0 && (
-              <div className="flex flex-col items-center gap-3 py-16 text-center text-text3">
-                <p className="text-sm">No review matches this combination of repository and status.</p>
-                <Button variant="secondary" size="sm" onClick={() => router.push("/reviews")}>
-                  Clear filters
-                </Button>
-              </div>
-            )}
-
-            {!isLoading &&
-              data?.reviews.map((review) => (
-                <div key={review.id} className="flex items-center">
-                  <div className="flex-1">
-                    <ReviewTableRow review={review} repoName={repoName(review.repoId)} />
-                  </div>
-                  {review.status === "FAILED" && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="mr-5 flex-none"
-                      disabled={retryMutation.isPending}
-                      onClick={() => retryMutation.mutate(review.id)}
-                    >
-                      Retry
-                    </Button>
-                  )}
+              {!isLoading && data?.reviews.length === 0 && (
+                <div className="flex flex-col items-center gap-3 py-16 text-center text-text3">
+                  <p className="text-sm">
+                    No review matches this combination of repository and status.
+                  </p>
+                  <Button variant="secondary" size="sm" onClick={() => router.push("/reviews")}>
+                    Clear filters
+                  </Button>
                 </div>
-              ))}
+              )}
+
+              {!isLoading &&
+                data?.reviews.map((review) => (
+                  <div key={review.id} className="flex items-center">
+                    <div className="flex-1">
+                      <ReviewTableRow review={review} repoName={repoName(review.repoId)} />
+                    </div>
+                    {review.status === "FAILED" && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="mr-5 flex-none"
+                        disabled={retryMutation.isPending}
+                        onClick={() => retryMutation.mutate(review.id)}
+                      >
+                        Retry
+                      </Button>
+                    )}
+                  </div>
+                ))}
+            </div>
           </div>
 
           {retryMutation.isError && <ErrorBanner message={getErrorMessage(retryMutation.error)} />}

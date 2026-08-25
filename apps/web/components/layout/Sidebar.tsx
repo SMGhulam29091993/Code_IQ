@@ -9,6 +9,12 @@ import { useRepos } from "@/hooks/useRepos";
 import { useReviews } from "@/hooks/useReviews";
 import { cn } from "@/lib/utils";
 
+interface SidebarProps {
+  // Only passed by the mobile drawer in (dashboard)/layout.tsx, so a link click also closes
+  // the drawer — the desktop-static rendering has no drawer to close, so this stays optional.
+  onNavigate?: () => void;
+}
+
 // Badge counts are real (repo count, review total), not the mockup's static 6/48 — see
 // .ai/knowledge/technical/frontend/design-system.md.
 const NAV_ITEMS = [
@@ -23,7 +29,7 @@ const NAV_ITEMS = [
 // .ai/knowledge/screens/dashboard-screens.md — sidebar footer (installation switcher + user
 // row) was in the mockup from the start but missed in the initial Step 1 scaffold; added here
 // once GET /auth/me (Step 8) made a real user row possible.
-export const Sidebar: FC = () => {
+export const Sidebar: FC<SidebarProps> = ({ onNavigate }) => {
   const pathname = usePathname();
   const { data: repos } = useRepos();
   const { data: reviews } = useReviews({ limit: 1, page: 1 });
@@ -56,6 +62,7 @@ export const Sidebar: FC = () => {
             <Link
               key={item.href}
               href={item.href}
+              onClick={onNavigate}
               aria-current={isActive ? "page" : undefined}
               className={cn(
                 "flex items-center justify-between gap-2 rounded-button px-3 py-2 text-[13.5px] font-medium text-text2 hover:bg-surface2 hover:text-text",
@@ -75,6 +82,7 @@ export const Sidebar: FC = () => {
         {installation && (
           <Link
             href="/account?tab=workspace"
+            onClick={onNavigate}
             className="flex items-center gap-2.5 rounded-button border border-border bg-surface2 px-2.5 py-2 hover:bg-surface3"
           >
             <span className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded bg-accent font-display text-[11px] font-bold text-bg">
