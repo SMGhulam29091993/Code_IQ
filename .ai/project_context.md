@@ -2,7 +2,7 @@
 > AI-POS Index · ~150 lines · Links out; does not duplicate detail
 
 ## What this project is
-CodeIQ is a GitHub App that automatically reviews every pull request using Gemini 1.5 Pro.
+CodeIQ is a GitHub App that automatically reviews every pull request using Gemini 2.5 Flash.
 It posts inline comments per file, a PR-level summary, and stores all reviews in a dashboard.
 Billing is Stripe seat-based. Multi-tenant by GitHub App installation.
 

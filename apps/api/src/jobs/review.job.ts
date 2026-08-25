@@ -1,4 +1,5 @@
 import type { Job } from "bullmq";
+import { mapWithConcurrency } from "../lib/concurrency";
 import { getInstallationOctokit } from "../lib/octokit";
 import type { IInstallationRepository } from "../modules/github/github.types";
 import type { ConfigService } from "../modules/repos/config.service";
@@ -11,6 +12,15 @@ import type {
   IReviewRepository,
   ReviewJobData,
 } from "../modules/reviews/review.types";
+
+// Caps how many chunks' Gemini calls run at once per review. Added 2026-08-26 after the
+// previous unbounded Promise.allSettled(chunks.map(...)) blew through the free tier's 5
+// requests/minute quota on any PR with more than a few chunks. This bounds *this review's* own
+// burst; it doesn't coordinate across multiple reviews running concurrently (worker.ts's
+// REVIEW_WORKER_CONCURRENCY=5 means several reviews' chunk batches could still overlap and
+// jointly exceed the quota) — gemini.service.ts's retry-with-backoff is what makes that case
+// recover instead of fail outright, rather than this cap trying to prevent it entirely.
+const CHUNK_CONCURRENCY = 3;
 
 // Exact pipeline pseudocode from .ai/knowledge/domains/review.md "Core pipeline: review.job.ts".
 // Called only from the BullMQ worker (jobs/worker.ts) — never from a controller
@@ -69,20 +79,17 @@ export class ReviewJobProcessor {
       // 6. Chunk each file's diff
       const chunks = this.diffService.chunkFiles(filesToReview);
 
-      // 7. Call Gemini for each chunk in parallel
-      const results = await Promise.allSettled(
-        chunks.map((chunk) =>
-          this.geminiService.reviewDiff(chunk.patch, repoConfig, chunk.filename)
-        )
+      // 7. Call Gemini for each chunk, capped at CHUNK_CONCURRENCY in flight at once
+      const results = await mapWithConcurrency(chunks, CHUNK_CONCURRENCY, (chunk) =>
+        this.geminiService.reviewDiff(chunk.patch, repoConfig, chunk.filename)
       );
 
-      // ALL Gemini calls failing is a pipeline failure — BullMQ retries. A partial failure
-      // (some chunks rejected) is not; step 8 just skips the rejected ones.
-      if (results.every((result) => result.status === "rejected")) {
-        throw new Error("All Gemini review calls failed");
-      }
-
-      // 8. Aggregate issues (ignore rejected chunks — log warning)
+      // 8. Aggregate issues (ignore rejected chunks — log warning). Logging runs unconditionally,
+      // before the "all failed" check below, so a total-failure run still records *why* each
+      // chunk failed — previously the throw happened first and swallowed every reason (see
+      // .ai/knowledge/domains/review.md "Implementation notes", found 2026-08-26 debugging a
+      // real all-chunks-failed run that left nothing more specific than "All Gemini review calls
+      // failed" in the logs).
       const allIssues: Array<GeminiIssue & { file: string }> = [];
       results.forEach((result, i) => {
         const chunk = chunks[i]!;
@@ -94,6 +101,12 @@ export class ReviewJobProcessor {
           console.warn(`Chunk failed for ${chunk.filename}: ${String(result.reason)}`);
         }
       });
+
+      // ALL Gemini calls failing is a pipeline failure — BullMQ retries. A partial failure
+      // (some chunks rejected) is not; the loop above already skipped the rejected ones.
+      if (results.every((result) => result.status === "rejected")) {
+        throw new Error("All Gemini review calls failed");
+      }
 
       // 9. Store issues
       await this.reviewIssueRepo.createMany(review.id, allIssues);
