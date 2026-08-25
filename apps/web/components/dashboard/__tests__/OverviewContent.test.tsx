@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
+import { axe } from "jest-axe";
 import { HttpResponse, http } from "msw";
 import { useRouter } from "next/navigation";
 import { type ReactElement } from "react";
@@ -60,5 +61,12 @@ describe("OverviewContent", () => {
 
     await waitFor(() => expect(screen.getByText("Couldn't load review stats.")).toBeInTheDocument());
     expect(await screen.findByText("Add idempotency keys to webhook handler")).toBeInTheDocument();
+  });
+
+  it("has no accessibility violations", async () => {
+    const { container } = renderWithProviders(<OverviewContent />);
+    await screen.findByText("148");
+
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

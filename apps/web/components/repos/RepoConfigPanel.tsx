@@ -249,6 +249,7 @@ export const RepoConfigPanel: FC<RepoConfigPanelProps> = ({ repoId }) => {
                 type="button"
                 role="switch"
                 aria-checked={values[s.key]}
+                aria-label={s.label}
                 onClick={() => setValue(s.key, !values[s.key], { shouldDirty: true })}
                 className={cn(
                   "flex h-6 w-10 flex-none items-center rounded-full border p-0.5 transition-colors",

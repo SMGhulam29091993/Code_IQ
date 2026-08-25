@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { axe } from "jest-axe";
 import { HttpResponse, http } from "msw";
 import { useRouter } from "next/navigation";
 import { type ReactElement } from "react";
@@ -158,6 +159,12 @@ describe("RegisterForm", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /creating account/i })).toBeDisabled()
     );
+  });
+
+  it("has no accessibility violations", async () => {
+    const { container } = renderWithProviders(<RegisterForm />);
+
+    expect(await axe(container)).toHaveNoViolations();
   });
 
   describe("after successful registration (OTP step)", () => {

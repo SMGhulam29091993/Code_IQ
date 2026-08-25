@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { axe } from "jest-axe";
 import { HttpResponse, http } from "msw";
 import { useRouter, useSearchParams } from "next/navigation";
 import { type ReactElement } from "react";
@@ -105,5 +106,24 @@ describe("OnboardingSteps", () => {
     await userEvent.click(screen.getByRole("button", { name: /activate 1 repository/i }));
 
     await waitFor(() => expect(push).toHaveBeenCalledWith("/overview"));
+  });
+
+  it("has no accessibility violations", async () => {
+    server.use(
+      http.get("/api/github/installations", () =>
+        HttpResponse.json({
+          success: true,
+          message: "Success",
+          data: { installations: [mockInstallation] },
+        })
+      ),
+      http.get("/api/repos", () =>
+        HttpResponse.json({ success: true, message: "Success", data: { repos: [mockInactiveRepo] } })
+      )
+    );
+    const { container } = renderWithProviders(<OnboardingSteps />);
+    await screen.findByText(mockInactiveRepo.fullName);
+
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

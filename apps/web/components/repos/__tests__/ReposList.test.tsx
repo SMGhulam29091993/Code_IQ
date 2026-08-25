@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { axe } from "jest-axe";
 import { HttpResponse, http } from "msw";
 import { useRouter } from "next/navigation";
 import { type ReactElement } from "react";
@@ -83,9 +84,10 @@ describe("ReposList", () => {
     renderWithProviders(<ReposList />);
     await screen.findByText(mockInactiveRepo.fullName);
 
-    const row = screen.getByLabelText(`Repository ${mockInactiveRepo.fullName}`);
-    const toggle = row.querySelector('button[aria-label="Activate"]')!;
-    await userEvent.click(toggle);
+    // Row-navigation button and toggle button are siblings, not nested (a <button> inside a
+    // role="button" row is itself an accessibility violation — see RepoCard's note), so the
+    // toggle is queried directly rather than scoped inside the row.
+    await userEvent.click(screen.getByRole("button", { name: "Activate" }));
 
     await waitFor(() =>
       expect(screen.getByText(/reached the free tier's repo limit/i)).toBeInTheDocument()
@@ -97,5 +99,12 @@ describe("ReposList", () => {
     await userEvent.click(await screen.findByText(mockRepo.fullName));
 
     expect(push).toHaveBeenCalledWith(`/repos/${mockRepo.id}`);
+  });
+
+  it("has no accessibility violations", async () => {
+    const { container } = renderWithProviders(<ReposList />);
+    await screen.findByText(mockRepo.fullName);
+
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

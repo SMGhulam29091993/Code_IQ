@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { axe } from "jest-axe";
 import { HttpResponse, http } from "msw";
 import { useRouter } from "next/navigation";
 import { type ReactElement } from "react";
@@ -108,5 +109,12 @@ describe("ReviewDetailContent", () => {
 
     expect(screen.queryByText("Info issue")).not.toBeInTheDocument();
     expect(screen.getByText(mockReview.issues[0]!.message)).toBeInTheDocument();
+  });
+
+  it("has no accessibility violations", async () => {
+    const { container } = renderWithProviders(<ReviewDetailContent reviewId="rev_1" />);
+    await screen.findByText(mockReview.summary!);
+
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

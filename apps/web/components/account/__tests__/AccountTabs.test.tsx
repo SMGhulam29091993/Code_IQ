@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { axe } from "jest-axe";
 import { HttpResponse, http } from "msw";
 import { useRouter, useSearchParams } from "next/navigation";
 import { type ReactElement } from "react";
@@ -160,5 +161,12 @@ describe("AccountTabs", () => {
     renderWithProviders(<AccountTabs />);
 
     expect(await screen.findByText(/no github installation connected/i)).toBeInTheDocument();
+  });
+
+  it("has no accessibility violations", async () => {
+    const { container } = renderWithProviders(<AccountTabs />);
+    await screen.findByDisplayValue(mockUser.name);
+
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

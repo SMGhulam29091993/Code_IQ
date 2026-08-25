@@ -1,6 +1,6 @@
 "use client";
 
-import { type FC, useState } from "react";
+import { type FC, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
@@ -20,6 +20,19 @@ export const DangerZone: FC<DangerZoneProps> = ({ installationId }) => {
   const clearActiveInstallation = useInstallationStore((s) => s.clearActiveInstallation);
   const deleteMutation = useDeleteInstallation();
   const [confirming, setConfirming] = useState(false);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  // Keyboard-nav audit (.ai/plans/frontend.md Step 9): the confirm dialog is a plain div, not
+  // a native <dialog>, so it gets no automatic focus move or Escape handling — added both here.
+  useEffect(() => {
+    if (!confirming) return;
+    cancelRef.current?.focus();
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setConfirming(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [confirming]);
 
   function handleConfirm() {
     deleteMutation.mutate(installationId, {
@@ -60,6 +73,7 @@ export const DangerZone: FC<DangerZoneProps> = ({ installationId }) => {
               {deleteMutation.isPending ? "Removing..." : "Yes, remove it"}
             </Button>
             <Button
+              ref={cancelRef}
               variant="ghost"
               size="sm"
               disabled={deleteMutation.isPending}

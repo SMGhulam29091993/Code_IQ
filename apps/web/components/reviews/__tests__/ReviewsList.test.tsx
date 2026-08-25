@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { axe } from "jest-axe";
 import { HttpResponse, http } from "msw";
 import { useRouter, useSearchParams } from "next/navigation";
 import { type ReactElement } from "react";
@@ -115,5 +116,12 @@ describe("ReviewsList", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Retry" }));
 
     await waitFor(() => expect(called).toBe(true));
+  });
+
+  it("has no accessibility violations", async () => {
+    const { container } = renderWithProviders(<ReviewsList />);
+    await screen.findByText(mockReviewSummary.prTitle);
+
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { axe } from "jest-axe";
 import { HttpResponse, http } from "msw";
 import { type ReactElement } from "react";
 import { describe, expect, it } from "vitest";
@@ -70,5 +71,12 @@ describe("RepoConfigPanel", () => {
     await userEvent.click(screen.getByText("CRITICAL"));
 
     expect(screen.getByText("unsaved changes")).toBeInTheDocument();
+  });
+
+  it("has no accessibility violations", async () => {
+    const { container } = renderWithProviders(<RepoConfigPanel repoId="repo_1" />);
+    await screen.findByText("WARNING");
+
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

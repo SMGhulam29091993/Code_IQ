@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { axe } from "jest-axe";
 import { HttpResponse, http } from "msw";
 import { useSearchParams } from "next/navigation";
 import { type ReactElement } from "react";
@@ -96,5 +97,12 @@ describe("BillingContent", () => {
     await userEvent.click(screen.getByRole("button", { name: /switch to pro/i }));
 
     await waitFor(() => expect(called).toBe(true));
+  });
+
+  it("has no accessibility violations", async () => {
+    const { container } = renderWithProviders(<BillingContent />);
+    await screen.findByText("FREE");
+
+    expect(await axe(container)).toHaveNoViolations();
   });
 });
