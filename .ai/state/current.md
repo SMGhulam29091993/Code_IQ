@@ -21,18 +21,37 @@ before each part was built. See `state/completed.md` for the full breakdown and
 `plans/frontend.md` Steps 3–9 for per-screen/step detail.
 
 ## Local dev environment note
-Both Docker containers were rebuilt and are current as of this session's end (previously
-`api-api-1` predated Step 8 — 404'd on `GET /auth/me`, 500'd on `GET /reviews/stats` — and
-`api-web-1` predated Steps 8–9 *and* never had `NEXT_PUBLIC_GITHUB_APP_SLUG` threaded through its
-build at all, see the Onboarding-link fix above). `docker compose build api web && docker compose
-up -d api web` was run against the current source; both are now live on their usual ports
-(4000/3000) with fresh code. No local `pnpm dev` processes were left running. Postgres/Redis
-containers were left running throughout, unchanged. The `verify@codeiq.dev` seed account's
-password is **no longer `TestPass123!`** — it was changed during Step 8's own live
-change-password verification pass and never reset; a login attempt this session confirmed the
-old password no longer works. A second seed user exists from this session's verification instead
-(`step9check@codeiq.dev` / `TestPass123!`, installation `step9-org`, 2 repos, 2 reviews, 1
-issue) — both accounts' data are harmless leftovers, useful for exploring the dashboard locally.
+Session ended with the user about to shut the machine down (Docker included), mid-way through
+first-ever live verification of the real review pipeline against a real GitHub PR. State as of
+that point:
+- **Real GitHub App wired up end-to-end**: installed on the user's own account
+  (`SMGhulam29091993`, installation `156551794`... — see git log for the full saga), webhook
+  delivering correctly via an ngrok tunnel (`https://flakily-scrabble-swiftly.ngrok-free.dev` →
+  local `:4000`, path must be `/api/webhooks/github`) — **the ngrok tunnel dies when the machine
+  shuts down and gets a new random subdomain on `ngrok http` restart** (free tier, no reserved
+  domain) unless `ngrok http --url=flakily-scrabble-swiftly.ngrok-free.dev 4000` is used to
+  reclaim the same one. Either way, next session needs to re-run ngrok and confirm the Webhook
+  URL on `github.com/settings/apps/codeiq29091993` still matches.
+- **`GEMINI_API_KEY` swapped to a real key** (in `apps/api/.env`, gitignored) after the original
+  was invalid; **model changed from `gemini-1.5-pro` (fully retired by Google) to
+  `gemini-2.5-flash`** (Pro-tier models 429 with a hard 0 free-tier quota without billing —
+  `knowledge/technical/backend/architecture.md` has the full story). Free tier is still only 5
+  requests/minute, so `lib/concurrency.ts` (chunk concurrency cap) + retry-with-backoff in
+  `gemini.service.ts` were added and committed this session — see git log
+  `fix(api): switch to Gemini 2.5 Flash, add retry-on-429 and chunk concurrency cap`.
+- **Verification was IN PROGRESS, not confirmed complete**: a manually-enqueued review job for
+  the real PR #8 (`SMGhulam29091993/Code_IQ`, review id `cmt923ad6000001p3x0bnqqxy`) was still
+  `RUNNING` when the session paused — never confirmed to reach `DONE` with a real GitHub comment
+  posted. **First thing next session: check that review's final status**, and if it never
+  finished (likely, since the container stops with the machine), re-enqueue or just open a fresh
+  small PR and watch it end-to-end for real.
+- Both Docker containers (`api`, `web`) were rebuilt earlier this session and were running with
+  current code when the session paused. They'll need `docker compose up -d` again next time (the
+  images are already built, no rebuild needed unless code changed again) — Postgres/Redis data
+  persists via volumes across restarts, so seed data survives. The `verify@codeiq.dev` seed
+  account's password is **no longer `TestPass123!`** (changed during Step 8's live test, never
+  reset). A second seed user exists from Step 9 (`step9check@codeiq.dev` / `TestPass123!`,
+  installation `step9-org`, 2 repos, 2 reviews) — harmless, useful for exploring the dashboard.
 
 ## Active plan step
 `plans/frontend.md` → Steps 3–9 [ complete ]
@@ -40,12 +59,17 @@ issue) — both accounts' data are harmless leftovers, useful for exploring the 
 EC2/RDS/ElastiCache + Secrets Manager + prod webhook URL still open (unchanged this session)
 
 ## Last updated
-2026-08-25
+2026-08-26 (mid-session pause, not a natural stopping point — see "Next action")
 
 ## Next action
-Frontend's mockup-derived plan (Steps 1–9) is now fully complete. Backend Step 7's AWS work is
-still open but needs real cloud access this session doesn't have — the only concretely open
-item left in either plan.
+1. Confirm review `cmt923ad6000001p3x0bnqqxy` (or a fresh test PR) actually reaches `DONE` with a
+   real comment posted to GitHub — this was the one thing never confirmed before the session
+   paused for a machine shutdown.
+2. Restart ngrok (same reserved domain if possible) and re-verify the Webhook URL on GitHub still
+   points at it with the `/api/webhooks/github` path.
+3. `docker compose up -d` for `api`/`web` (images already built with the latest code).
+4. Otherwise, frontend Steps 1–9 are fully complete; backend Step 7's AWS work is the only other
+   open item, and needs real cloud access this session doesn't have.
 
 ## Working branch
 This session's work landed directly on `feat/auth-screens` (the branch already checked out at
