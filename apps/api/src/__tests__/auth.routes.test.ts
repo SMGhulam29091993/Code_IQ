@@ -35,7 +35,12 @@ vi.mock("nodemailer", () => ({
 // container.ts wires the GitHub module (Step 3) alongside auth, and WebhookService imports
 // the real reviewQueue, which would otherwise open a real BullMQ/ioredis connection here —
 // unrelated to these auth tests. See webhook.service.test.ts for reviewQueue.add coverage.
-vi.mock("../jobs/queue", () => ({ reviewQueue: { add: vi.fn() } }));
+vi.mock("../jobs/queue", () => ({
+  reviewCoordinatorQueue: { add: vi.fn() },
+  reviewFlowProducer: { add: vi.fn() },
+  REVIEW_CHUNK_QUEUE_NAME: "review-chunk-queue",
+  REVIEW_FINALIZE_QUEUE_NAME: "review-finalize-queue",
+}));
 
 const NOW = new Date("2026-01-01T00:00:00Z");
 

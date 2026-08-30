@@ -53,7 +53,12 @@ vi.mock("@octokit/auth-app", () => ({ createAppAuth: vi.fn() }));
 // container.ts wires WebhookService (unused by these routes) with the real reviewQueue,
 // which would otherwise open a real BullMQ/ioredis connection on import — see
 // webhook.service.test.ts for reviewQueue.add behaviour coverage.
-vi.mock("../jobs/queue", () => ({ reviewQueue: { add: vi.fn() } }));
+vi.mock("../jobs/queue", () => ({
+  reviewCoordinatorQueue: { add: vi.fn() },
+  reviewFlowProducer: { add: vi.fn() },
+  REVIEW_CHUNK_QUEUE_NAME: "review-chunk-queue",
+  REVIEW_FINALIZE_QUEUE_NAME: "review-finalize-queue",
+}));
 
 const NOW = new Date("2026-01-01T00:00:00Z");
 

@@ -180,7 +180,7 @@
   if/when one is added.
 - AWS provisioning is out of scope for local tooling — real infra, needs separate access/authorization.
 
-## Step 8 — Scalable review pipeline (chunk-level fan-out) [ not started ]
+## Step 8 — Scalable review pipeline (chunk-level fan-out) [ in-progress ]
 
 > Design: `decisions/007-chunk-level-fanout-review-pipeline.md` +
 > `knowledge/technical/backend/review-pipeline-scaling.md` (full HLD/LLD). Raised because the
@@ -212,9 +212,25 @@
   Verified: `pnpm --filter @codeiq/db build`, `pnpm --filter @codeiq/api typecheck`, `lint`,
   `build`, and `test` (326/326, 4 new retry-resume cases) all pass clean. Not yet
   live-verified against a real GitHub PR retry (needs Docker/ngrok — see `state/current.md`).
-- [ ] Phase 3 — Split into `review-chunk-queue` + `review-finalize-queue` via BullMQ
-  `FlowProducer`; fleet-wide Gemini rate limit via `Worker.limiter`; load-test against a real
-  large PR before rollout
+- [x] Phase 3 — Split into `review-chunk-queue` + `review-finalize-queue` via BullMQ
+  `FlowProducer`; fleet-wide Gemini rate limit via `Worker.limiter`. The single
+  `ReviewJobProcessor`/`jobs/review.job.ts` from Phase 1/2 is gone, replaced by 3 processors:
+  `ReviewCoordinatorJobProcessor` (`jobs/review-coordinator.job.ts`, `review-coordinator-queue` —
+  same queue `webhook.service.ts` enqueues into, renamed from `review-queue`), `ReviewChunkJobProcessor`
+  (`jobs/review-chunk.job.ts`, `review-chunk-queue`, `Worker.limiter: { max: 5, duration: 60_000 }`
+  — still the free tier's 5 RPM), and `ReviewFinalizeJobProcessor` (`jobs/review-finalize.job.ts`,
+  `review-finalize-queue`, the Flow parent). New `reviewFlowProducer` singleton (`jobs/queue.ts`)
+  and `modules/reviews/resolve-review-context.ts` (installation octokit + effective repoConfig,
+  resolved once and shared by the coordinator and `ReviewService.retryReview` — never re-fetched
+  per chunk). `retryReview` now calls `reviewFlowProducer.add` directly with the review's
+  incomplete chunks as Flow children instead of enqueueing into the coordinator queue.
+  `knowledge/domains/review.md`'s "Core pipeline" section rewritten for the 3-processor
+  architecture (this doc's own Phase 3 section here now points there for current behavior).
+  Verified: `pnpm --filter @codeiq/api typecheck`, `lint`, `build`, and `test` (328/328 — 3 new
+  processor test files replacing the old single-job one) all pass clean. **Not yet load-tested
+  against a real large PR** — that and confirming `failParentOnFailure: false` under real
+  partial-chunk-failure conditions are still open before trusting this at scale in production
+  (see `knowledge/technical/backend/review-pipeline-scaling.md` Phase 3 note).
 - [ ] Phase 4 — Per-installation fairness (`fairnessService`, priority scoring),
   `MAX_CHUNKS_PER_REVIEW` truncation + prioritization, live progress wired into the dashboard
 - `knowledge/domains/review.md` gets updated to match actual behavior after each phase ships —

@@ -246,9 +246,11 @@ export interface ICommentService {
   postReview(octokit: import("@octokit/rest").Octokit, input: PostReviewInput): Promise<number>;
 }
 
-// BullMQ job payload — enqueued by modules/github/webhook.service.ts (fresh review) and
-// review.service.ts's retryReview (resumed review, reviewId set).
-export interface ReviewJobData {
+// BullMQ job payload for the coordinator job (review-coordinator-queue) — enqueued only by
+// modules/github/webhook.service.ts, for a fresh PR review. Fetches the diff, persists
+// ReviewChunk rows, and fans them out via reviewFlowProducer (decisions/007 Phase 3). Retries
+// never go through this queue — see ReviewChunkJobData/ReviewFinalizeJobData below.
+export interface ReviewCoordinatorJobData {
   installationId: string;
   repoId: string;
   prNumber: number;
@@ -256,7 +258,29 @@ export interface ReviewJobData {
   prAuthor: string;
   headSha: string;
   repoFullName: string;
-  // Set only on retry: resume this existing Review (re-run only its non-DONE ReviewChunk rows)
-  // instead of creating a new Review row and re-fetching/re-chunking the diff from scratch.
-  reviewId?: string;
+}
+
+// BullMQ job payload for one chunk (review-chunk-queue) — a child job under a finalize-review
+// Flow, added either by the coordinator (fresh review) or ReviewService.retryReview (resumed
+// review). repoConfig is resolved once by whichever of those two created the Flow and threaded
+// through here rather than re-fetched per chunk — see resolve-review-context.ts.
+export interface ReviewChunkJobData {
+  reviewId: string;
+  chunkId: string;
+  filename: string;
+  patch: string;
+  repoConfig: SanitizedRepoConfig;
+}
+
+// BullMQ job payload for the finalize job (review-finalize-queue) — the Flow parent. BullMQ
+// activates it automatically once every review-chunk child has settled; failParentOnFailure:
+// false on each child means one chunk failing (after its own retries) doesn't block this.
+export interface ReviewFinalizeJobData {
+  reviewId: string;
+  installationId: string;
+  owner: string;
+  repo: string;
+  prNumber: number;
+  prTitle: string;
+  headSha: string;
 }

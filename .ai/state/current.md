@@ -57,12 +57,15 @@ that point:
 `plans/frontend.md` → Steps 3–9 [ complete ]
 `plans/backend.md` → Step 7: Deploy [ in-progress ] — Dockerfiles/compose/health done, AWS
 EC2/RDS/ElastiCache + Secrets Manager + prod webhook URL still open (unchanged this session)
-`plans/backend.md` → Step 8: Scalable review pipeline [ in-progress ] — Phase 1 (`ReviewChunk`
-schema) and Phase 2 (chunk persistence + resumable retry, still single-job execution) both
-shipped 2026-08-30, unit-verified (326/326 tests) but not yet live-verified against a real
-GitHub PR retry — needs the Docker/ngrok setup described below. Phases 3–4 (queue split via
-`FlowProducer`, fairness/backpressure/live progress) not started — see `plans/backend.md` Step 8
-for detail.
+`plans/backend.md` → Step 8: Scalable review pipeline [ in-progress ] — Phases 1–3 all shipped
+2026-08-30: `ReviewChunk` schema, chunk persistence + resumable retry, and the `FlowProducer`
+queue split (`review-coordinator-queue` / `review-chunk-queue` / `review-finalize-queue`, 3
+processors replacing the old single `ReviewJobProcessor`). Unit/integration-verified (328/328
+tests) but **not yet live-verified against a real GitHub PR** — needs the Docker/ngrok setup
+described below, plus real load-testing of the Phase 3 queue split (a large PR, and confirming
+`failParentOnFailure: false` behaves under real partial-chunk-failure) before trusting it at scale
+in production. Phase 4 (fairness/backpressure/live progress) not started — see `plans/backend.md`
+Step 8 for detail.
 
 ## Last updated
 2026-08-26 (mid-session pause, not a natural stopping point — see "Next action")

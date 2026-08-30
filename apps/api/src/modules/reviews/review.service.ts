@@ -1,7 +1,9 @@
 import type { Review, ReviewIssue } from "@codeiq/db";
+import { resolveReviewContext } from "./resolve-review-context";
 import type {
   GetReviewResult,
   GetStatsFilters,
+  IReviewChunkRepository,
   IReviewRepository,
   IReviewService,
   IssueCategory,
@@ -16,14 +18,19 @@ import type {
   SanitizedReviewIssue,
   SanitizedReviewSummary,
 } from "./review.types";
-import { reviewQueue } from "../../jobs/queue";
+import { REVIEW_CHUNK_QUEUE_NAME, REVIEW_FINALIZE_QUEUE_NAME, reviewFlowProducer } from "../../jobs/queue";
 import { AppError, BadRequestError, ForbiddenError, NotFoundError } from "../../lib/errors";
+import type { IInstallationRepository } from "../github/github.types";
+import type { ConfigService } from "../repos/config.service";
 import type { IRepoRepository } from "../repos/repo.types";
 
 export class ReviewService implements IReviewService {
   constructor(
     private readonly reviewRepo: IReviewRepository,
-    private readonly repoRepo: IRepoRepository
+    private readonly repoRepo: IRepoRepository,
+    private readonly reviewChunkRepo: IReviewChunkRepository,
+    private readonly installationRepo: IInstallationRepository,
+    private readonly configService: ConfigService
   ) {}
 
   async listReviews(userId: string, filters: ListReviewsFilters): Promise<ListReviewsResult> {
@@ -56,26 +63,57 @@ export class ReviewService implements IReviewService {
       throw new NotFoundError("Repo not found");
     }
 
-    const updated = await this.reviewRepo.update(reviewId, { status: "PENDING" });
+    const incomplete = await this.reviewChunkRepo.findIncomplete(reviewId);
+    const updated = await this.reviewRepo.update(reviewId, { status: "RUNNING" });
 
     try {
-      // Await only the enqueue — same stance as webhook.service.ts (.ai/rules/backend.md #6).
-      // reviewId tells ReviewJobProcessor to resume this review (only its non-DONE ReviewChunk
-      // rows re-run) instead of creating a new Review row from scratch — decisions/007 Phase 2.
-      await reviewQueue.add(
-        "review-pr",
-        {
+      // Resolved once here (not per chunk) for the same reason the coordinator job does it once
+      // — see resolve-review-context.ts. decisions/007 Phase 3: retry re-enters the Flow
+      // directly (never review-coordinator-queue) since the review's chunks — and their
+      // already-persisted patches — are already known; only chunks that never reached DONE
+      // (`incomplete` above) re-run, so a retry never re-pays for an already-successful chunk.
+      const { owner, repo: repoName, repoConfig } = await resolveReviewContext(
+        repo.id,
+        repo.fullName,
+        repo.installationId,
+        this.installationRepo,
+        this.configService
+      );
+
+      await reviewFlowProducer.add({
+        name: "finalize-review",
+        queueName: REVIEW_FINALIZE_QUEUE_NAME,
+        data: {
           reviewId,
           installationId: repo.installationId,
-          repoId: repo.id,
+          owner,
+          repo: repoName,
           prNumber: review.prNumber,
           prTitle: review.prTitle,
-          prAuthor: review.prAuthor,
           headSha: review.headSha,
-          repoFullName: repo.fullName,
         },
-        { jobId: `retry-${reviewId}` }
-      );
+        children: incomplete.map((chunk) => ({
+          name: "review-chunk",
+          queueName: REVIEW_CHUNK_QUEUE_NAME,
+          data: {
+            reviewId,
+            chunkId: chunk.id,
+            filename: chunk.filename,
+            patch: chunk.patch,
+            repoConfig,
+          },
+          opts: {
+            // A new jobId per retry generation — the chunk's original jobId
+            // (`${reviewId}:${chunk.id}`) is already DONE/terminal in BullMQ and needs a fresh
+            // id to run again. `attempts` (already incremented by every prior run of this
+            // chunk) makes each retry generation's id unique even across repeated retries.
+            jobId: `${reviewId}:${chunk.id}:retry${chunk.attempts}`,
+            attempts: 3,
+            backoff: { type: "exponential", delay: 2000 },
+            failParentOnFailure: false,
+          },
+        })),
+      });
     } catch {
       throw new AppError("Review queue unavailable", 503);
     }

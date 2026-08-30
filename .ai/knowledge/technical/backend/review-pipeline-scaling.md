@@ -1,7 +1,9 @@
 # Review Pipeline Scaling — HLD & LLD
 > Full design behind [decisions/007](../../decisions/007-chunk-level-fanout-review-pipeline.md).
-> Read that ADR first for the *why*; this doc is the *how*. Not yet implemented — see
-> "Migration phases" at the bottom for build order, and `plans/backend.md` Step 8 for status.
+> Read that ADR first for the *why*; this doc is the *how*. Phases 1–3 are implemented (see
+> "Migration phases" at the bottom); real behavior now lives in
+> `knowledge/domains/review.md` "Core pipeline" — this doc stays the design record. Phase 4 not
+> started. See `plans/backend.md` Step 8 for status.
 
 ## Design goals
 1. Large-PR latency scales with fleet capacity, not with one process's in-memory pool.
@@ -308,22 +310,33 @@ The current pipeline is live-verified against a real GitHub App/PR (see `state/c
 this ships incrementally, not as one rewrite, so each phase can be verified independently before
 the next.
 
-### Phase 1 — Schema only (additive, no behavior change)
+### Phase 1 — Schema only (additive, no behavior change) [ shipped 2026-08-30 ]
 Add `ReviewChunk` model + `Review.totalChunks/completedChunks/truncated` + `ReviewIssue.chunkId`.
 Migrate. Nothing reads/writes the new table yet. Zero risk.
 
-### Phase 2 — Chunk persistence inside the existing single-job pipeline
+### Phase 2 — Chunk persistence inside the existing single-job pipeline [ shipped 2026-08-30 ]
 Keep today's one-BullMQ-job-per-PR execution model (still `mapWithConcurrency` in-process), but
 have `ReviewJobProcessor` write a `ReviewChunk` row (PENDING → RUNNING → DONE/FAILED) around each
 chunk's Gemini call, and stamp `ReviewIssue.chunkId`. Change `retryReview` to only re-run chunks
 that aren't `DONE`. **This alone fixes the worst production risk (wasted re-work on retry)**
 without touching queue topology — low risk, ships independently, immediately valuable.
+Superseded by Phase 3's queue split below (the single `ReviewJobProcessor` no longer exists), but
+the `ReviewChunk` persistence and resumable-retry behavior it introduced carried straight through
+unchanged.
 
-### Phase 3 — Queue split (the horizontal-scaling + fairness unlock)
-Introduce `review-chunk-queue` and `review-finalize-queue`, move chunk execution out of the
-coordinator job into real BullMQ jobs via `FlowProducer`, add the Worker-level `limiter`. Higher
-risk — needs load testing against a real large PR before rollout, and careful verification that
-`failParentOnFailure: false` behaves as expected under partial chunk failure.
+### Phase 3 — Queue split (the horizontal-scaling + fairness unlock) [ shipped 2026-08-30 ]
+Introduced `review-chunk-queue` and `review-finalize-queue`, moved chunk execution out of the
+coordinator job into real BullMQ jobs via `FlowProducer` (`ReviewCoordinatorJobProcessor`,
+`ReviewChunkJobProcessor`, `ReviewFinalizeJobProcessor` — `jobs/review-{coordinator,chunk,finalize}.job.ts`),
+added the chunk queue's Worker-level `limiter` (`GEMINI_RPM_BUDGET`, fleet-wide via Redis).
+`ReviewService.retryReview` now calls `reviewFlowProducer.add` directly with the review's
+incomplete `ReviewChunk` rows as children, instead of going through `review-coordinator-queue`.
+See `knowledge/domains/review.md` "Core pipeline" for the current (real) pseudocode and unit test
+list — that doc, not this one, is now the source of truth for pipeline *behavior*.
+**Not yet load-tested against a real large PR** — unit/integration-verified only
+(`pnpm test`, 328/328); real-PR load testing and `failParentOnFailure: false` verification under
+actual partial-chunk-failure conditions is still open before this is trusted at scale in
+production.
 
 ### Phase 4 — Fairness + backpressure + live progress
 Per-installation priority scoring (`fairnessService`), `MAX_CHUNKS_PER_REVIEW` truncation, and

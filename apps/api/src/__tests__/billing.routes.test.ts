@@ -36,7 +36,12 @@ vi.mock("@octokit/rest", () => ({
   })),
 }));
 vi.mock("@octokit/auth-app", () => ({ createAppAuth: vi.fn() }));
-vi.mock("../jobs/queue", () => ({ reviewQueue: { add: vi.fn() } }));
+vi.mock("../jobs/queue", () => ({
+  reviewCoordinatorQueue: { add: vi.fn() },
+  reviewFlowProducer: { add: vi.fn() },
+  REVIEW_CHUNK_QUEUE_NAME: "review-chunk-queue",
+  REVIEW_FINALIZE_QUEUE_NAME: "review-finalize-queue",
+}));
 
 // Mock our own thin wrapper (same stance as ../jobs/queue above) rather than the "stripe"
 // package itself — BillingService only ever depends on this module's exported instance.

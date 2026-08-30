@@ -3,7 +3,7 @@ import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@codeiq/db";
 import { app } from "../app";
-import { reviewQueue } from "../jobs/queue";
+import { reviewFlowProducer } from "../jobs/queue";
 
 vi.mock("@codeiq/db", () => ({
   prisma: {
@@ -11,6 +11,9 @@ vi.mock("@codeiq/db", () => ({
     repo: { findUnique: vi.fn() },
     review: { findUnique: vi.fn(), update: vi.fn(), count: vi.fn(), findMany: vi.fn() },
     reviewIssue: { groupBy: vi.fn().mockResolvedValue([]), findMany: vi.fn().mockResolvedValue([]) },
+    reviewChunk: { findMany: vi.fn().mockResolvedValue([]) },
+    installation: { findUnique: vi.fn() },
+    repoConfig: { findUnique: vi.fn().mockResolvedValue(null) },
     $transaction: vi.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
   },
 }));
@@ -32,7 +35,12 @@ vi.mock("nodemailer", () => ({
 
 vi.mock("@octokit/rest", () => ({ Octokit: vi.fn().mockImplementation(() => ({ rest: {} })) }));
 vi.mock("@octokit/auth-app", () => ({ createAppAuth: vi.fn() }));
-vi.mock("../jobs/queue", () => ({ reviewQueue: { add: vi.fn() } }));
+vi.mock("../jobs/queue", () => ({
+  reviewCoordinatorQueue: { add: vi.fn() },
+  reviewFlowProducer: { add: vi.fn() },
+  REVIEW_CHUNK_QUEUE_NAME: "review-chunk-queue",
+  REVIEW_FINALIZE_QUEUE_NAME: "review-finalize-queue",
+}));
 
 const NOW = new Date("2026-01-01T00:00:00Z");
 
@@ -103,6 +111,8 @@ function mockPrisma() {
       count: ReturnType<typeof vi.fn>;
       findMany: ReturnType<typeof vi.fn>;
     };
+    reviewChunk: { findMany: ReturnType<typeof vi.fn> };
+    installation: { findUnique: ReturnType<typeof vi.fn> };
   };
 }
 
@@ -186,22 +196,36 @@ describe("Review routes", () => {
   });
 
   describe("POST /api/reviews/:reviewId/retry", () => {
-    it("resets a FAILED review to PENDING and enqueues a new job", async () => {
+    it("resets a FAILED review to RUNNING and re-enters the Flow with its incomplete chunks", async () => {
       mockPrisma().review.findUnique.mockResolvedValueOnce({
         ...buildReview({ status: "FAILED" }),
         repo: { installation: { userId: "user-1" } },
       });
       mockPrisma().repo.findUnique.mockResolvedValueOnce(buildRepo());
-      mockPrisma().review.update.mockResolvedValueOnce(buildReview({ status: "PENDING" }));
+      mockPrisma().installation.findUnique.mockResolvedValueOnce({ githubInstallationId: 555 });
+      mockPrisma().reviewChunk.findMany.mockResolvedValueOnce([
+        { id: "chunk-1", reviewId: "review-1", filename: "a.ts", patch: "@@ -1 +1 @@", chunkIndex: 0, status: "FAILED", attempts: 1 },
+      ]);
+      mockPrisma().review.update.mockResolvedValueOnce(buildReview({ status: "RUNNING" }));
 
       const res = await auth(request(app).post("/api/reviews/review-1/retry"));
 
       expect(res.status).toBe(200);
-      expect(res.body.data.review.status).toBe("PENDING");
-      expect(reviewQueue.add).toHaveBeenCalledWith(
-        "review-pr",
-        expect.objectContaining({ repoId: "repo-1" }),
-        { jobId: "retry-review-1" }
+      expect(res.body.data.review.status).toBe("RUNNING");
+      expect(reviewFlowProducer.add).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "finalize-review",
+          queueName: "review-finalize-queue",
+          data: expect.objectContaining({ reviewId: "review-1" }),
+          children: [
+            expect.objectContaining({
+              name: "review-chunk",
+              queueName: "review-chunk-queue",
+              data: expect.objectContaining({ reviewId: "review-1", chunkId: "chunk-1" }),
+              opts: expect.objectContaining({ jobId: "review-1:chunk-1:retry1" }),
+            }),
+          ],
+        })
       );
     });
 

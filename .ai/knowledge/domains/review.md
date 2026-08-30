@@ -174,135 +174,178 @@ describe('ReviewService.getStats', () => {
 
 ---
 
-## Core pipeline: review.job.ts
+## Core pipeline: 3 BullMQ processors (decisions/007 Phase 3)
 
-This is the BullMQ worker. It is called only from the job queue — never from a controller.
+The pipeline is 3 separate processors on 3 queues, fanned out/in via BullMQ's `FlowProducer` —
+see `knowledge/technical/backend/review-pipeline-scaling.md` "Queue topology" for the full
+rationale. Each is called only from the BullMQ worker (`jobs/worker.ts`) — never from a
+controller. `ReviewChunk` persistence (Phase 2) and resumable retry are unchanged in spirit, just
+spread across processors instead of living in one job.
 
-### Full pipeline pseudocode
+### 1. review-coordinator.job.ts — `ReviewCoordinatorJobProcessor` (`review-coordinator-queue`)
 
-Updated for decisions/007 Phase 2 (chunk persistence + resumable retry) — still one BullMQ job
-per PR/retry; see `knowledge/technical/backend/review-pipeline-scaling.md` for the queue-split
-Phase 3 that comes later.
+The only processor that creates a *new* `Review` row — enqueued solely by
+`webhook.service.ts`. Fetches the diff, persists `ReviewChunk` rows, and hands off to
+`reviewFlowProducer`; never runs a Gemini call itself, so it stays fast and cheap
+(`concurrency: 20`).
 ```
-processReviewJob(job):
-  { installationId, repoId, prNumber, prTitle, prAuthor, headSha, repoFullName, reviewId } = job.data
-  isRetry = Boolean(reviewId)
+processCoordinatorJob(job):
+  { installationId, repoId, prNumber, prTitle, prAuthor, headSha, repoFullName } = job.data
 
-  // 1. Create a Review row (status: RUNNING) for a fresh review, or load the existing one for a
-  // retry — ReviewService.retryReview already reset it to PENDING before enqueueing.
-  review = isRetry ? reviewRepo.findById(reviewId) : reviewRepo.create({
-    repoId, prNumber, prTitle, prAuthor, headSha, status: 'RUNNING',
+  // 1. Create Review row (status: RUNNING)
+  review = reviewRepo.create({ repoId, prNumber, prTitle, prAuthor, headSha, status: 'RUNNING' })
+
+  // 2-3. Installation-scoped Octokit + effective repo config, resolved once here and threaded
+  // through every chunk job's data (resolve-review-context.ts) — never re-fetched per chunk.
+  { octokit, owner, repo, repoConfig } = await resolveReviewContext(repoId, repoFullName, installationId, ...)
+
+  // 4. Fetch PR diff
+  files = await octokit.pulls.listFiles({ owner, repo, pull_number: prNumber })
+
+  // 5. Filter files by ignore patterns and config
+  filesToReview = diffService.filterFiles(files, repoConfig)
+  if filesToReview.length === 0:
+    reviewRepo.update(review.id, { status: 'DONE', summary: 'No reviewable files in this PR.', filesReviewed: 0 })
+    return
+
+  // 6. Chunk each file's diff and persist a ReviewChunk row (PENDING) per chunk *before*
+  // fanning out — a crash here still leaves chunks a retry can discover via findIncomplete.
+  chunks = diffService.chunkFiles(filesToReview)
+  chunkRows = reviewChunkRepo.createMany(review.id, chunks)
+  reviewRepo.update(review.id, { totalChunks: chunkRows.length })
+
+  // 7. Fan out: one review-chunk job per chunk under a review-finalize parent. BullMQ activates
+  // the parent automatically once every child has settled; failParentOnFailure: false means one
+  // chunk exhausting its own retries doesn't block finalization.
+  await flowProducer.add({
+    name: 'finalize-review', queueName: 'review-finalize-queue',
+    data: { reviewId: review.id, installationId, owner, repo, prNumber, prTitle, headSha },
+    children: chunkRows.map(row => ({
+      name: 'review-chunk', queueName: 'review-chunk-queue',
+      data: { reviewId: review.id, chunkId: row.id, filename: row.filename, patch: row.patch, repoConfig },
+      opts: { jobId: `${review.id}:${row.id}`, attempts: 3, backoff: { type: 'exponential', delay: 2000 }, failParentOnFailure: false },
+    })),
   })
 
-  // 2. Get installation-scoped Octokit
-  installation = installationRepo.findById(installationId)
-  octokit = getInstallationOctokit(installation.githubInstallationId)
-  [owner, repo] = repoFullName.split('/')
+ON ANY UNHANDLED ERROR:
+  reviewRepo.update(review.id, { status: 'FAILED' })
+  throw error  // BullMQ retries (max 3 attempts, exponential backoff)
+```
 
-  // 3. Load repo config (DB config merged with .codeiq.yml) — needed for every Gemini call
-  repoConfig = await configService.getEffectiveConfig(repoId, octokit, owner, repo)
+### 2. review-chunk.job.ts — `ReviewChunkJobProcessor` (`review-chunk-queue`)
 
-  if isRetry:
-    reviewRepo.update(review.id, { status: 'RUNNING' })
-    // Patches are already persisted on ReviewChunk rows from the original run — no GitHub
-    // diff re-fetch. Only chunks that never reached DONE re-run; DONE ones are never re-billed.
-    chunksToRun = reviewChunkRepo.findIncomplete(review.id)  // status PENDING or FAILED
-  else:
-    // 4. Fetch PR diff
-    files = await octokit.pulls.listFiles({ owner, repo, pull_number: prNumber })
+One job per chunk — the actual LLM-call workload, and the one queue you scale horizontally by
+adding worker pods. Rate-limited fleet-wide via the queue's `Worker.limiter` (Redis-backed), not
+an in-process pool. `attempts: 3` on each job (set by whoever created the Flow) means a failed
+Gemini call gets BullMQ's own retry/backoff before this processor ever needs `failParentOnFailure`
+to matter.
 
-    // 5. Filter files by ignore patterns and config
-    filesToReview = diffService.filterFiles(files, repoConfig)
-    if filesToReview.length === 0:
-      reviewRepo.update(review.id, { status: 'DONE', summary: 'No reviewable files in this PR.', filesReviewed: 0 })
-      return
+```
+processChunkJob(job):
+  { reviewId, chunkId, filename, patch, repoConfig } = job.data
 
-    // 6. Chunk each file's diff and persist a ReviewChunk row (PENDING) per chunk *before* any
-    // Gemini call — a crash from here on always has something to resume from on retry.
-    chunks = diffService.chunkFiles(filesToReview)
-    chunksToRun = reviewChunkRepo.createMany(review.id, chunks)
-    reviewRepo.update(review.id, { totalChunks: chunksToRun.length })
+  reviewChunkRepo.markRunning(chunkId)
+  try:
+    result = await geminiService.reviewDiff(patch, repoConfig, filename)
+    reviewIssueRepo.createMany(reviewId, result.issues.map(issue => ({ ...issue, file: filename, chunkId })))
+    reviewChunkRepo.markDone(chunkId)
+  catch (err):
+    reviewChunkRepo.markFailed(chunkId, String(err))
+    throw err   // lets BullMQ's attempts/backoff retry; failParentOnFailure:false means the
+                // parent still proceeds once retries are exhausted
+  finally:
+    reviewRepo.incrementCompletedChunks(reviewId)  // UI progress only — may over-count across
+                                                     // this job's own retries; never trusted for
+                                                     // the finalize job's DONE/FAILED gate
+```
 
-  // 7. Call Gemini for each pending/failed chunk, capped at CHUNK_CONCURRENCY (3) in flight,
-  // persisting chunk status around each call
-  await mapWithConcurrency(chunksToRun, CHUNK_CONCURRENCY, async (chunk) => {
-    reviewChunkRepo.markRunning(chunk.id)
-    try:
-      result = await geminiService.reviewDiff(chunk.patch, repoConfig, chunk.filename)
-      reviewIssueRepo.createMany(review.id, result.issues.map(issue => ({ ...issue, file: chunk.filename, chunkId: chunk.id })))
-      reviewChunkRepo.markDone(chunk.id)
-    catch (err):
-      log.warn(`Chunk failed for ${chunk.filename}: ${err}`)
-      reviewChunkRepo.markFailed(chunk.id, String(err))
-    finally:
-      reviewRepo.incrementCompletedChunks(review.id)  // UI progress only, never trusted for gating
-  })
+### 3. review-finalize.job.ts — `ReviewFinalizeJobProcessor` (`review-finalize-queue`)
 
-  // 8. Aggregate every issue persisted for this review so far — including issues from chunks
-  // that reached DONE in an earlier (failed) attempt, on a retry
-  allChunks = reviewChunkRepo.findByReviewId(review.id)
-  allIssues = reviewIssueRepo.findByReviewId(review.id)
+The Flow parent — BullMQ activates it automatically once every `review-chunk` child of the same
+Flow has settled (DONE or exhausted-retries FAILED). Aggregates whatever issues exist for the
+review (this run's chunks, plus — on a retry — chunks that already reached DONE in an earlier
+attempt), posts the single GitHub review, and marks the review DONE/FAILED.
 
-  if allChunks.length > 0 and allChunks.every(c => c.status === 'FAILED'):
-    throw new Error('All Gemini review calls failed')  // BullMQ retries; review marked FAILED below
+```
+processFinalizeJob(job):
+  { reviewId, installationId, owner, repo, prNumber, prTitle, headSha } = job.data
 
-  // 9. Generate PR-level summary
+  allChunks = reviewChunkRepo.findByReviewId(reviewId)
+  failedChunks = allChunks.filter(c => c.status === 'FAILED')
+
+  if allChunks.length > 0 and failedChunks.length === allChunks.length:
+    reviewRepo.update(reviewId, { status: 'FAILED' })   // no GitHub post — nothing succeeded
+    return
+
+  allIssues = reviewIssueRepo.findByReviewId(reviewId)
   summary = await geminiService.summarizePR(prTitle, allIssues)
+  if failedChunks.length > 0:
+    summary += `\n\n_${failedChunks.length} file section(s) could not be analyzed after retries._`
 
-  // 10. Post inline comments + summary to GitHub
+  octokit = getInstallationOctokit(installationRepo.findById(installationId).githubInstallationId)
   githubReviewId = await commentService.postReview(octokit, { owner, repo, prNumber, headSha, issues: allIssues, summary })
 
-  // 11. Mark done
-  reviewRepo.update(review.id, {
+  reviewRepo.update(reviewId, {
     status: 'DONE',
     summary,
     filesReviewed: new Set(allChunks.filter(c => c.status === 'DONE').map(c => c.filename)).size,
     githubReviewId,
   })
-
-ON ANY UNHANDLED ERROR:
-  reviewRepo.update(review.id, { status: 'FAILED' })
-  throw error  // BullMQ will retry (max 3 attempts with exponential backoff)
 ```
+
+### Retry (`POST /reviews/:reviewId/retry`)
+
+`ReviewService.retryReview` never touches `review-coordinator-queue` — a retry's chunks (and
+their already-persisted patches) are already known, so it resolves repo context once
+(`resolve-review-context.ts`, same helper the coordinator uses) and calls `reviewFlowProducer.add`
+directly with only the review's incomplete (`PENDING`/`FAILED`) `ReviewChunk` rows as children.
+Each child gets a fresh `jobId` (`${reviewId}:${chunkId}:retry${chunk.attempts}`) since the
+chunk's original job id is already terminal in BullMQ. A `DONE` chunk is never in the incomplete
+list, so it's never re-run and never re-billed.
 
 ### Edge cases in the review pipeline:
 | Case | Handling |
 |------|----------|
-| PR has 0 reviewable files after filtering | Mark DONE with note, no GitHub comment |
-| A Gemini chunk call fails | Log warning, skip that chunk, continue with others |
-| ALL Gemini calls fail | Mark review FAILED, BullMQ retries |
-| GitHub rate limit hit (403) | BullMQ retry with exponential backoff |
+| PR has 0 reviewable files after filtering | Coordinator marks DONE with note, no fan-out, no GitHub comment |
+| A Gemini chunk call fails (after its own retries) | That chunk stays FAILED; finalize still posts the DONE chunks' issues, with a note about the gap |
+| ALL chunks fail | Finalize marks review FAILED without posting to GitHub |
+| GitHub rate limit hit (403) | BullMQ retry with exponential backoff (whichever job made the call) |
 | PR deleted before review finishes | GitHub API returns 404 — mark DONE, log warning |
-| Gemini returns malformed JSON | Zod parse fails → mark chunk as failed → warning |
+| Gemini returns malformed JSON | Zod parse fails → chunk job throws → chunk marked FAILED |
 | Gemini returns > 50 issues for one chunk | Truncate at 50 (Zod schema `.max(50)`) |
 | File is binary (no `patch`) | Filter out in `diffService.filterFiles` |
 | File is in ignore pattern | Filter out in `diffService.filterFiles` |
-| Review job re-delivered (same deliveryId) | BullMQ `jobId` dedup — second enqueue is a no-op |
-| Concurrent jobs for same PR | Last one wins (headSha differs → separate Review row) |
-| Retry (job.data.reviewId set) | Resumes the existing Review; only re-runs `ReviewChunk` rows not yet `DONE` — no diff re-fetch, no re-billing already-successful chunks |
+| Coordinator job re-delivered (same deliveryId) | BullMQ `jobId` dedup on `review-coordinator-queue` — second enqueue is a no-op |
+| Concurrent coordinator jobs for same PR | Last one wins (headSha differs → separate Review row) |
+| Retry | Re-enters the Flow directly with only non-`DONE` `ReviewChunk` rows as children — no diff re-fetch, no re-billing already-successful chunks |
 | Retry where every chunk fails again | Review marked `FAILED` again, same as a fresh run |
+| One review-chunk job's Gemini call fails all 3 attempts | `failParentOnFailure: false` lets the finalize job run anyway once every sibling has also settled |
 
-### Unit test cases for review.job.ts:
+### Unit test cases
 ```typescript
-describe('ReviewJob.processReviewJob', () => {
-  it('creates a Review row with status RUNNING at start')
-  it('marks review DONE on successful completion')
-  it('marks review FAILED when unhandled error occurs')
-  it('calls geminiService for each file chunk')
-  it('uses Promise.allSettled — continues when one chunk fails')
-  it('skips chunks with no patch (binary files)')
-  it('applies ignore patterns from repo config')
-  it('posts all issues in a single GitHub review API call')
-  it('stores filesReviewed count correctly')
-  it('marks DONE with no-issues summary when all files are filtered out')
-  it('stores githubReviewId after successful GitHub post')
+describe('ReviewCoordinatorJobProcessor.process', () => {
+  it('creates a Review row at start')
+  it('marks review FAILED when the installation is not found')
+  it('applies ignore patterns from repo config via diffService.filterFiles')
+  it('marks DONE with no-issues summary when all files are filtered out, without fanning out')
+  it('persists a ReviewChunk row per chunk and records totalChunks before fanning out')
+  it('fans out one review-chunk job per chunk under a finalize-review parent')
 })
 
-describe('ReviewJob.processReviewJob — retry (job.data.reviewId set)', () => {
-  it('resumes the existing review instead of creating a new one')
-  it('only re-runs chunks that are not DONE, never re-billing an already-successful chunk')
-  it('aggregates issues from previously-DONE chunks together with newly-run chunks')
-  it('marks the resumed review FAILED again if the retry\'s chunks fail too')
+describe('ReviewChunkJobProcessor.process', () => {
+  it('marks the chunk RUNNING before calling Gemini')
+  it('calls Gemini with the chunk\'s patch, config, and filename')
+  it('persists returned issues tagged with the review, file, and chunk id')
+  it('marks the chunk DONE on success')
+  it('marks the chunk FAILED and rethrows (so BullMQ retries) when Gemini fails')
+  it('increments completedChunks whether the chunk succeeds or fails')
+})
+
+describe('ReviewFinalizeJobProcessor.process', () => {
+  it('posts a single GitHub review with every issue aggregated for the review')
+  it('marks the review DONE with distinct-filename filesReviewed and the githubReviewId')
+  it('marks the review FAILED without posting when every chunk failed')
+  it('still posts and marks DONE on a partial failure, noting the gap in the summary')
 })
 ```
 
