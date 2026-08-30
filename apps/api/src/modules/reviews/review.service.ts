@@ -60,9 +60,12 @@ export class ReviewService implements IReviewService {
 
     try {
       // Await only the enqueue — same stance as webhook.service.ts (.ai/rules/backend.md #6).
+      // reviewId tells ReviewJobProcessor to resume this review (only its non-DONE ReviewChunk
+      // rows re-run) instead of creating a new Review row from scratch — decisions/007 Phase 2.
       await reviewQueue.add(
         "review-pr",
         {
+          reviewId,
           installationId: repo.installationId,
           repoId: repo.id,
           prNumber: review.prNumber,

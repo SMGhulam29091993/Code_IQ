@@ -28,6 +28,7 @@ import { RepoService } from "./modules/repos/repo.service";
 import { CommentService } from "./modules/reviews/comment.service";
 import { DiffService } from "./modules/reviews/diff.service";
 import { GeminiService } from "./modules/reviews/gemini.service";
+import { ReviewChunkRepository } from "./modules/reviews/review-chunk.repository";
 import { ReviewIssueRepository } from "./modules/reviews/review-issue.repository";
 import { ReviewController } from "./modules/reviews/review.controller";
 import { ReviewRepository } from "./modules/reviews/review.repository";
@@ -94,6 +95,7 @@ const billingService = new BillingService(
 export const billingController = new BillingController(billingService);
 
 const reviewIssueRepository = new ReviewIssueRepository();
+const reviewChunkRepository = new ReviewChunkRepository();
 const diffService = new DiffService();
 const geminiService = new GeminiService(geminiModel);
 const commentService = new CommentService();
@@ -112,5 +114,6 @@ export const reviewJobProcessor = new ReviewJobProcessor(
   configService,
   diffService,
   geminiService,
-  commentService
+  commentService,
+  reviewChunkRepository
 );

@@ -178,74 +178,86 @@ describe('ReviewService.getStats', () => {
 
 This is the BullMQ worker. It is called only from the job queue — never from a controller.
 
-### Full pipeline pseudocode:
+### Full pipeline pseudocode
+
+Updated for decisions/007 Phase 2 (chunk persistence + resumable retry) — still one BullMQ job
+per PR/retry; see `knowledge/technical/backend/review-pipeline-scaling.md` for the queue-split
+Phase 3 that comes later.
 ```
 processReviewJob(job):
-  { installationId, repoId, prNumber, prTitle, prAuthor, headSha, repoFullName } = job.data
+  { installationId, repoId, prNumber, prTitle, prAuthor, headSha, repoFullName, reviewId } = job.data
+  isRetry = Boolean(reviewId)
 
-  // 1. Create Review row (status: RUNNING)
-  review = reviewRepo.create({
-    repoId, prNumber, prTitle, prAuthor, headSha,
-    status: 'RUNNING',
+  // 1. Create a Review row (status: RUNNING) for a fresh review, or load the existing one for a
+  // retry — ReviewService.retryReview already reset it to PENDING before enqueueing.
+  review = isRetry ? reviewRepo.findById(reviewId) : reviewRepo.create({
+    repoId, prNumber, prTitle, prAuthor, headSha, status: 'RUNNING',
   })
 
   // 2. Get installation-scoped Octokit
   installation = installationRepo.findById(installationId)
   octokit = getInstallationOctokit(installation.githubInstallationId)
-
-  // 3. Fetch PR diff
   [owner, repo] = repoFullName.split('/')
-  files = await octokit.pulls.listFiles({ owner, repo, pull_number: prNumber })
-  // files: Array<{ filename, patch, status, additions, deletions }>
 
-  // 4. Load repo config (DB config merged with .codeiq.yml)
+  // 3. Load repo config (DB config merged with .codeiq.yml) — needed for every Gemini call
   repoConfig = await configService.getEffectiveConfig(repoId, octokit, owner, repo)
 
-  // 5. Filter files by ignore patterns and config
-  filesToReview = diffService.filterFiles(files, repoConfig)
-  if filesToReview.length === 0:
-    reviewRepo.update(review.id, { status: 'DONE', summary: 'No reviewable files in this PR.' })
-    return
+  if isRetry:
+    reviewRepo.update(review.id, { status: 'RUNNING' })
+    // Patches are already persisted on ReviewChunk rows from the original run — no GitHub
+    // diff re-fetch. Only chunks that never reached DONE re-run; DONE ones are never re-billed.
+    chunksToRun = reviewChunkRepo.findIncomplete(review.id)  // status PENDING or FAILED
+  else:
+    // 4. Fetch PR diff
+    files = await octokit.pulls.listFiles({ owner, repo, pull_number: prNumber })
 
-  // 6. Chunk each file's diff
-  chunks = diffService.chunkFiles(filesToReview)
-  // chunks: Array<{ filename, patch, chunkIndex }>
+    // 5. Filter files by ignore patterns and config
+    filesToReview = diffService.filterFiles(files, repoConfig)
+    if filesToReview.length === 0:
+      reviewRepo.update(review.id, { status: 'DONE', summary: 'No reviewable files in this PR.', filesReviewed: 0 })
+      return
 
-  // 7. Call Gemini for each chunk in parallel (Promise.allSettled)
-  results = await Promise.allSettled(
-    chunks.map(chunk => geminiService.reviewDiff(chunk.patch, repoConfig, chunk.filename))
-  )
+    // 6. Chunk each file's diff and persist a ReviewChunk row (PENDING) per chunk *before* any
+    // Gemini call — a crash from here on always has something to resume from on retry.
+    chunks = diffService.chunkFiles(filesToReview)
+    chunksToRun = reviewChunkRepo.createMany(review.id, chunks)
+    reviewRepo.update(review.id, { totalChunks: chunksToRun.length })
 
-  // 8. Aggregate issues (ignore rejected chunks — log warning)
-  allIssues = []
-  for [i, result] in results.entries():
-    if result.status === 'fulfilled':
-      allIssues.push(...result.value.issues.map(issue => ({
-        ...issue,
-        file: chunks[i].filename,
-      })))
-    else:
-      log.warn(`Chunk failed for ${chunks[i].filename}: ${result.reason}`)
-
-  // 9. Store issues
-  reviewIssueRepo.createMany(review.id, allIssues)
-
-  // 10. Generate PR-level summary
-  summary = await geminiService.summarizePR(prTitle, allIssues)
-
-  // 11. Post inline comments + summary to GitHub
-  await commentService.postReview(octokit, {
-    owner, repo, prNumber, headSha,
-    issues: allIssues,
-    summary,
+  // 7. Call Gemini for each pending/failed chunk, capped at CHUNK_CONCURRENCY (3) in flight,
+  // persisting chunk status around each call
+  await mapWithConcurrency(chunksToRun, CHUNK_CONCURRENCY, async (chunk) => {
+    reviewChunkRepo.markRunning(chunk.id)
+    try:
+      result = await geminiService.reviewDiff(chunk.patch, repoConfig, chunk.filename)
+      reviewIssueRepo.createMany(review.id, result.issues.map(issue => ({ ...issue, file: chunk.filename, chunkId: chunk.id })))
+      reviewChunkRepo.markDone(chunk.id)
+    catch (err):
+      log.warn(`Chunk failed for ${chunk.filename}: ${err}`)
+      reviewChunkRepo.markFailed(chunk.id, String(err))
+    finally:
+      reviewRepo.incrementCompletedChunks(review.id)  // UI progress only, never trusted for gating
   })
 
-  // 12. Mark done
+  // 8. Aggregate every issue persisted for this review so far — including issues from chunks
+  // that reached DONE in an earlier (failed) attempt, on a retry
+  allChunks = reviewChunkRepo.findByReviewId(review.id)
+  allIssues = reviewIssueRepo.findByReviewId(review.id)
+
+  if allChunks.length > 0 and allChunks.every(c => c.status === 'FAILED'):
+    throw new Error('All Gemini review calls failed')  // BullMQ retries; review marked FAILED below
+
+  // 9. Generate PR-level summary
+  summary = await geminiService.summarizePR(prTitle, allIssues)
+
+  // 10. Post inline comments + summary to GitHub
+  githubReviewId = await commentService.postReview(octokit, { owner, repo, prNumber, headSha, issues: allIssues, summary })
+
+  // 11. Mark done
   reviewRepo.update(review.id, {
     status: 'DONE',
     summary,
-    filesReviewed: filesToReview.length,
-    githubReviewId: <id from step 11>,
+    filesReviewed: new Set(allChunks.filter(c => c.status === 'DONE').map(c => c.filename)).size,
+    githubReviewId,
   })
 
 ON ANY UNHANDLED ERROR:
@@ -267,6 +279,8 @@ ON ANY UNHANDLED ERROR:
 | File is in ignore pattern | Filter out in `diffService.filterFiles` |
 | Review job re-delivered (same deliveryId) | BullMQ `jobId` dedup — second enqueue is a no-op |
 | Concurrent jobs for same PR | Last one wins (headSha differs → separate Review row) |
+| Retry (job.data.reviewId set) | Resumes the existing Review; only re-runs `ReviewChunk` rows not yet `DONE` — no diff re-fetch, no re-billing already-successful chunks |
+| Retry where every chunk fails again | Review marked `FAILED` again, same as a fresh run |
 
 ### Unit test cases for review.job.ts:
 ```typescript
@@ -282,6 +296,13 @@ describe('ReviewJob.processReviewJob', () => {
   it('stores filesReviewed count correctly')
   it('marks DONE with no-issues summary when all files are filtered out')
   it('stores githubReviewId after successful GitHub post')
+})
+
+describe('ReviewJob.processReviewJob — retry (job.data.reviewId set)', () => {
+  it('resumes the existing review instead of creating a new one')
+  it('only re-runs chunks that are not DONE, never re-billing an already-successful chunk')
+  it('aggregates issues from previously-DONE chunks together with newly-run chunks')
+  it('marks the resumed review FAILED again if the retry\'s chunks fail too')
 })
 ```
 
@@ -470,13 +491,26 @@ describe('CommentService.postReview', () => {
   follow this — its totals are all-time and only `recentTrend` is windowed (fixed 30 days) — so
   don't assume the two stats endpoints share a filtering convention.
 - **`ReviewJobProcessor` (not `review.job.ts` as a bare function) is the pipeline entry point.**
-  It's a class taking all seven dependencies via constructor (mirrors every other module's
+  It's a class taking all eight dependencies via constructor (mirrors every other module's
   DI pattern) with a single `process(job)` method; `container.ts` wires the concrete instance as
   `reviewJobProcessor`, and `jobs/worker.ts`'s `startReviewWorker(processor)` is what `server.ts`
   calls at boot to register the BullMQ consumer. Nothing else calls `.process()` directly.
 - **Retry re-enqueues with `jobId: retry-${reviewId}`**, not the original GitHub delivery ID —
   `ReviewService.retryReview` has no delivery ID to reuse. This still gets BullMQ's dedup
-  protection (pitfall #004) if a user double-clicks retry while the first retry is in flight.
+  protection (pitfall #004) if a user double-clicks retry while the first retry is in flight. One
+  side effect (unchanged by decisions/007 Phase 2, pre-existing): because the jobId is a pure
+  function of `reviewId` and BullMQ refuses to re-add a job whose id already exists (even
+  terminal/completed), retrying the *same* review a second time after its first retry already
+  completed silently no-ops rather than enqueueing — hasn't come up in practice yet, flagging in
+  case it does.
+- **decisions/007 Phase 2 (chunk-level fan-out, groundwork): `ReviewChunk` rows are now persisted
+  around every Gemini call**, and `ReviewJobData.reviewId` (set only by `retryReview`) tells the
+  processor to resume that review's non-`DONE` chunks instead of creating a new `Review` row and
+  re-fetching/re-chunking the diff from GitHub. `Review.completedChunks` is incremented
+  atomically (`{ increment: 1 }`) in each chunk's `finally` block for UI progress only — the
+  "did everything fail" gate at finalize time always re-queries real `ReviewChunk` rows via
+  `findByReviewId`, never that counter. This is still one BullMQ job per PR/retry (chunk
+  execution isn't its own queue yet — see `review-pipeline-scaling.md` Phase 3).
 - **`postSummaryComment` (a `RepoConfig` field) is not consulted by the pipeline.** Step 11 of
   the pseudocode above always calls `commentService.postReview`, unconditionally — there's no
   gate in this doc's pseudocode, so `ReviewJobProcessor` doesn't add one. The field exists in

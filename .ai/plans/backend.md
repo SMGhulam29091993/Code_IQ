@@ -199,8 +199,19 @@
   dev` with a P3015 error unrelated to this change).
   Verified: `pnpm --filter @codeiq/db build`, `pnpm --filter @codeiq/api typecheck`, `lint`, and
   `test` (322/322) all pass clean; migration applied live via `prisma migrate dev`.
-- [ ] Phase 2 — `ReviewJobProcessor` persists `ReviewChunk` rows around each chunk's Gemini call
-  (still single-job execution); `retryReview` only re-runs non-`DONE` chunks
+- [x] Phase 2 — `ReviewJobProcessor` persists `ReviewChunk` rows around each chunk's Gemini call
+  (still single-job execution); `retryReview` only re-runs non-`DONE` chunks. New
+  `ReviewChunkRepository` (`createMany`/`findByReviewId`/`findIncomplete`/`markRunning`/
+  `markDone`/`markFailed`), `IReviewRepository.incrementCompletedChunks` (atomic DB increment),
+  `IReviewIssueRepository.findByReviewId`. `ReviewJobData` gained an optional `reviewId` —
+  `ReviewService.retryReview` now passes the existing review's id so the job resumes it (no new
+  Review row, no diff re-fetch) instead of starting over; the finalize step always re-queries
+  real `ReviewChunk` rows for its DONE/FAILED gate, never the denormalized `completedChunks`
+  counter. `knowledge/domains/review.md`'s pipeline pseudocode/edge-case table/test list updated
+  to match.
+  Verified: `pnpm --filter @codeiq/db build`, `pnpm --filter @codeiq/api typecheck`, `lint`,
+  `build`, and `test` (326/326, 4 new retry-resume cases) all pass clean. Not yet
+  live-verified against a real GitHub PR retry (needs Docker/ngrok — see `state/current.md`).
 - [ ] Phase 3 — Split into `review-chunk-queue` + `review-finalize-queue` via BullMQ
   `FlowProducer`; fleet-wide Gemini rate limit via `Worker.limiter`; load-test against a real
   large PR before rollout

@@ -74,6 +74,7 @@ describe("ReviewService", () => {
       countIssuesByCategoryForUser: vi.fn(),
       countIssuesByDayForUser: vi.fn(),
       countReviewsByAuthorForInstallation: vi.fn(),
+      incrementCompletedChunks: vi.fn(),
     };
     repoRepo = {
       findManyForUser: vi.fn(),
@@ -234,7 +235,7 @@ describe("ReviewService", () => {
       expect(reviewRepo.update).toHaveBeenCalledWith("review-1", { status: "PENDING" });
       expect(reviewQueue.add).toHaveBeenCalledWith(
         "review-pr",
-        expect.objectContaining({ installationId: "install-1", repoId: "repo-1" }),
+        expect.objectContaining({ reviewId: "review-1", installationId: "install-1", repoId: "repo-1" }),
         { jobId: "retry-review-1" }
       );
       expect(result.review.status).toBe("PENDING");

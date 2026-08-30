@@ -6,13 +6,17 @@ import type { IInstallationRepository } from "../modules/github/github.types";
 import type { ConfigService } from "../modules/repos/config.service";
 import type { SanitizedRepoConfig } from "../modules/repos/repo.types";
 import type {
+  CreateChunkInput,
   DiffChunk,
   DiffFile,
+  GeminiIssue,
   ICommentService,
   IDiffService,
   IGeminiService,
+  IReviewChunkRepository,
   IReviewIssueRepository,
   IReviewRepository,
+  ReviewChunkRow,
   ReviewJobData,
 } from "../modules/reviews/review.types";
 
@@ -82,10 +86,22 @@ describe("ReviewJobProcessor.process", () => {
   let diffService: IDiffService;
   let geminiService: IGeminiService;
   let commentService: ICommentService;
+  let reviewChunkRepo: IReviewChunkRepository;
   let processor: ReviewJobProcessor;
+
+  // Simple in-memory stand-ins for the ReviewChunk/ReviewIssue tables — decisions/007 Phase 2
+  // moved chunk-level state and issue aggregation to be re-read from "storage" at finalize time
+  // rather than accumulated in-process, so the fakes need to behave like real persistence
+  // (survive across calls within one process() run) rather than being stateless mocks.
+  let chunkStore: ReviewChunkRow[] = [];
+  let issueStore: Array<GeminiIssue & { file: string; chunkId?: string }> = [];
+  let nextChunkId = 0;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    chunkStore = [];
+    issueStore = [];
+    nextChunkId = 0;
 
     reviewRepo = {
       findManyForUser: vi.fn(),
@@ -97,8 +113,52 @@ describe("ReviewJobProcessor.process", () => {
       countIssuesByCategoryForUser: vi.fn(),
       countIssuesByDayForUser: vi.fn(),
       countReviewsByAuthorForInstallation: vi.fn(),
+      incrementCompletedChunks: vi.fn(),
     };
-    reviewIssueRepo = { createMany: vi.fn() };
+    reviewIssueRepo = {
+      createMany: vi.fn().mockImplementation(async (_reviewId, issues) => {
+        issueStore.push(...issues);
+      }),
+      findByReviewId: vi.fn().mockImplementation(async () => issueStore),
+    };
+    reviewChunkRepo = {
+      createMany: vi.fn().mockImplementation(async (reviewId: string, chunks: CreateChunkInput[]) => {
+        const rows = chunks.map(
+          (chunk): ReviewChunkRow => ({
+            id: `chunk-${++nextChunkId}`,
+            reviewId,
+            filename: chunk.filename,
+            patch: chunk.patch,
+            chunkIndex: chunk.chunkIndex,
+            status: "PENDING",
+            attempts: 0,
+          })
+        );
+        chunkStore.push(...rows);
+        return rows;
+      }),
+      findByReviewId: vi.fn().mockImplementation(async () => chunkStore),
+      findIncomplete: vi
+        .fn()
+        .mockImplementation(async () =>
+          chunkStore.filter((row) => row.status === "PENDING" || row.status === "FAILED")
+        ),
+      markRunning: vi.fn().mockImplementation(async (chunkId: string) => {
+        const row = chunkStore.find((r) => r.id === chunkId);
+        if (row) {
+          row.status = "RUNNING";
+          row.attempts += 1;
+        }
+      }),
+      markDone: vi.fn().mockImplementation(async (chunkId: string) => {
+        const row = chunkStore.find((r) => r.id === chunkId);
+        if (row) row.status = "DONE";
+      }),
+      markFailed: vi.fn().mockImplementation(async (chunkId: string) => {
+        const row = chunkStore.find((r) => r.id === chunkId);
+        if (row) row.status = "FAILED";
+      }),
+    };
     installationRepo = {
       findByGithubId: vi.fn(),
       findById: vi.fn().mockResolvedValue({ githubInstallationId: 555 } as Installation),
@@ -129,7 +189,8 @@ describe("ReviewJobProcessor.process", () => {
       configService,
       diffService,
       geminiService,
-      commentService
+      commentService,
+      reviewChunkRepo
     );
   });
 
@@ -256,5 +317,111 @@ describe("ReviewJobProcessor.process", () => {
       "review-1",
       expect.objectContaining({ githubReviewId: 777 })
     );
+  });
+
+  // decisions/007 Phase 2: retry (job.data.reviewId set) resumes an existing review's
+  // already-persisted ReviewChunk rows instead of creating a new Review and re-fetching/
+  // re-chunking the diff from GitHub.
+  describe("retry (job.data.reviewId set)", () => {
+    function seedExistingChunk(overrides: Partial<ReviewChunkRow> = {}): ReviewChunkRow {
+      const row: ReviewChunkRow = {
+        id: `chunk-${++nextChunkId}`,
+        reviewId: "review-1",
+        filename: "a.ts",
+        patch: "@@ -1 +1 @@",
+        chunkIndex: 0,
+        status: "PENDING",
+        attempts: 0,
+        ...overrides,
+      };
+      chunkStore.push(row);
+      return row;
+    }
+
+    beforeEach(() => {
+      vi.mocked(reviewRepo.findById).mockResolvedValue({
+        ...buildReview({ status: "PENDING" }),
+        issues: [],
+        repo: { installation: { userId: "user-1" } },
+      });
+    });
+
+    it("resumes the existing review instead of creating a new one", async () => {
+      seedExistingChunk({ status: "FAILED" });
+
+      await processor.process(buildJob({ reviewId: "review-1" }));
+
+      expect(reviewRepo.create).not.toHaveBeenCalled();
+      expect(reviewRepo.findById).toHaveBeenCalledWith("review-1");
+      expect(fakeOctokit.pulls.listFiles).not.toHaveBeenCalled();
+    });
+
+    it("only re-runs chunks that are not DONE, never re-billing an already-successful chunk", async () => {
+      const doneChunk = seedExistingChunk({ filename: "done.ts", status: "DONE" });
+      issueStore.push({
+        line: 1,
+        severity: "info",
+        category: "style",
+        message: "already found",
+        suggestion: "s",
+        file: doneChunk.filename,
+        chunkId: doneChunk.id,
+      });
+      seedExistingChunk({ filename: "failed.ts", status: "FAILED" });
+
+      await processor.process(buildJob({ reviewId: "review-1" }));
+
+      expect(geminiService.reviewDiff).toHaveBeenCalledTimes(1);
+      expect(geminiService.reviewDiff).toHaveBeenCalledWith(
+        "@@ -1 +1 @@",
+        DEFAULT_CONFIG,
+        "failed.ts"
+      );
+    });
+
+    it("aggregates issues from previously-DONE chunks together with newly-run chunks", async () => {
+      const doneChunk = seedExistingChunk({ filename: "done.ts", status: "DONE" });
+      issueStore.push({
+        line: 1,
+        severity: "info",
+        category: "style",
+        message: "already found",
+        suggestion: "s",
+        file: doneChunk.filename,
+        chunkId: doneChunk.id,
+      });
+      seedExistingChunk({ filename: "failed.ts", status: "FAILED" });
+      vi.mocked(geminiService.reviewDiff).mockResolvedValue({
+        issues: [
+          { line: 2, severity: "warning", category: "bug", message: "new issue", suggestion: "s2" },
+        ],
+        summary: "ok",
+      });
+
+      await processor.process(buildJob({ reviewId: "review-1" }));
+
+      expect(commentService.postReview).toHaveBeenCalledWith(
+        fakeOctokit,
+        expect.objectContaining({
+          issues: expect.arrayContaining([
+            expect.objectContaining({ file: "done.ts" }),
+            expect.objectContaining({ file: "failed.ts" }),
+          ]),
+        })
+      );
+      expect(reviewRepo.update).toHaveBeenCalledWith(
+        "review-1",
+        expect.objectContaining({ status: "DONE", filesReviewed: 2 })
+      );
+    });
+
+    it("marks the resumed review FAILED again if the retry's chunks fail too", async () => {
+      seedExistingChunk({ filename: "failed.ts", status: "FAILED" });
+      vi.mocked(geminiService.reviewDiff).mockRejectedValue(new Error("still down"));
+
+      await expect(processor.process(buildJob({ reviewId: "review-1" }))).rejects.toThrow();
+
+      expect(reviewRepo.update).toHaveBeenCalledWith("review-1", { status: "FAILED" });
+    });
   });
 });

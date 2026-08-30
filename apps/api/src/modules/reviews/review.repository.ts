@@ -98,6 +98,13 @@ export class ReviewRepository implements IReviewRepository {
     });
     return Object.fromEntries(rows.map((r) => [r.prAuthor, r._count._all]));
   }
+
+  async incrementCompletedChunks(reviewId: string): Promise<void> {
+    await prisma.review.update({
+      where: { id: reviewId },
+      data: { completedChunks: { increment: 1 } },
+    });
+  }
 }
 
 function issueWhereForUser(userId: string, filters: { repoId?: string; since?: Date }) {

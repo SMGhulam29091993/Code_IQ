@@ -4,6 +4,7 @@ import type { SanitizedRepoConfig } from "../repos/repo.types";
 export type ReviewStatus = "PENDING" | "RUNNING" | "DONE" | "FAILED";
 export type IssueSeverity = "critical" | "warning" | "info";
 export type IssueCategory = "bug" | "security" | "style" | "performance" | "logic";
+export type ChunkStatus = "PENDING" | "RUNNING" | "DONE" | "FAILED";
 
 export interface SanitizedReviewIssue {
   id: string;
@@ -92,6 +93,7 @@ export interface UpdateReviewInput {
   summary?: string;
   filesReviewed?: number;
   githubReviewId?: number;
+  totalChunks?: number;
 }
 
 export interface CreateIssueInput {
@@ -101,6 +103,23 @@ export interface CreateIssueInput {
   category: IssueCategory;
   message: string;
   suggestion: string;
+  chunkId?: string;
+}
+
+export interface CreateChunkInput {
+  filename: string;
+  patch: string;
+  chunkIndex: number;
+}
+
+export interface ReviewChunkRow {
+  id: string;
+  reviewId: string;
+  filename: string;
+  patch: string;
+  chunkIndex: number;
+  status: ChunkStatus;
+  attempts: number;
 }
 
 export interface IReviewRepository {
@@ -136,10 +155,29 @@ export interface IReviewRepository {
     installationId: string,
     since: Date
   ): Promise<Record<string, number>>;
+  // Atomic at the DB level — safe to call from multiple chunks completing concurrently within
+  // the same job (mapWithConcurrency). UI-progress only; the finalize step (review.job.ts) never
+  // trusts this counter for its DONE/FAILED gating decision — it re-queries ReviewChunk rows
+  // directly. See knowledge/technical/backend/review-pipeline-scaling.md.
+  incrementCompletedChunks(reviewId: string): Promise<void>;
 }
 
 export interface IReviewIssueRepository {
   createMany(reviewId: string, issues: CreateIssueInput[]): Promise<void>;
+  // All issues persisted for a review so far, regardless of which job run created them —
+  // used at finalize time (fresh run and resumed retries alike) instead of accumulating issues
+  // in memory across a retry's in-process chunk loop.
+  findByReviewId(reviewId: string): Promise<Array<GeminiIssue & { file: string }>>;
+}
+
+export interface IReviewChunkRepository {
+  createMany(reviewId: string, chunks: CreateChunkInput[]): Promise<ReviewChunkRow[]>;
+  findByReviewId(reviewId: string): Promise<ReviewChunkRow[]>;
+  // PENDING or FAILED rows — what a retry needs to re-run. DONE rows are never re-run/re-billed.
+  findIncomplete(reviewId: string): Promise<ReviewChunkRow[]>;
+  markRunning(chunkId: string): Promise<void>;
+  markDone(chunkId: string): Promise<void>;
+  markFailed(chunkId: string, error: string): Promise<void>;
 }
 
 export interface IReviewService {
@@ -208,8 +246,8 @@ export interface ICommentService {
   postReview(octokit: import("@octokit/rest").Octokit, input: PostReviewInput): Promise<number>;
 }
 
-// BullMQ job payload — enqueued by modules/github/webhook.service.ts, consumed by
-// jobs/review.job.ts.
+// BullMQ job payload — enqueued by modules/github/webhook.service.ts (fresh review) and
+// review.service.ts's retryReview (resumed review, reviewId set).
 export interface ReviewJobData {
   installationId: string;
   repoId: string;
@@ -218,4 +256,7 @@ export interface ReviewJobData {
   prAuthor: string;
   headSha: string;
   repoFullName: string;
+  // Set only on retry: resume this existing Review (re-run only its non-DONE ReviewChunk rows)
+  // instead of creating a new Review row and re-fetching/re-chunking the diff from scratch.
+  reviewId?: string;
 }

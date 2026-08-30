@@ -98,6 +98,7 @@ describe("RepoService", () => {
       countIssuesByCategoryForUser: vi.fn().mockResolvedValue({}),
       countIssuesByDayForUser: vi.fn().mockResolvedValue([]),
       countReviewsByAuthorForInstallation: vi.fn().mockResolvedValue({}),
+      incrementCompletedChunks: vi.fn(),
     };
 
     service = new RepoService(repoRepo, repoConfigRepo, installationRepo, reviewRepo);
