@@ -1,6 +1,13 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
+## 2026-08-30 side fix (unrelated to the active task below)
+`POST /auth/change-password` now revokes all of a user's other refresh tokens/sessions —
+closed a Critical/Security finding from `codeiq29091993 Bot`'s automated PR review. See
+`state/completed.md`'s 2026-08-30 entry and `knowledge/domains/auth.md`/
+`decisions/006-redis-for-refresh-tokens.md` for the detail. Does not touch the frontend Step
+3–9 / backend Step 7–8 work described below.
+
 ## Active task
 Frontend Steps 3–9 complete: the full CodeIQ Dashboard mockup (Onboarding, Overview, Repos,
 Reviews, Billing), Account & Workspace settings (Step 8, added per explicit user follow-up

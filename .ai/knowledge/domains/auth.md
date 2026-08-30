@@ -369,6 +369,13 @@ the reasoning — this replaced an earlier `RefreshToken` Postgres model whose `
 was written but never actually read (expiry was always enforced by the JWT itself).
 `findByToken` returns only `{ userId }` — no synthetic row id, since nothing ever consumed one.
 
+**`deleteAllForUser(userId)`** (added to back `POST /auth/change-password`'s session revocation,
+2026-08-30): there's no reverse index from `userId` to their tokens, so this is the one place in
+the codebase that enumerates Redis keys by pattern instead of an exact key — cursor-based `SCAN
+… MATCH refresh_token:* COUNT 100` (never `KEYS`, which blocks the server), `MGET` each page's
+keys, and `DEL` whichever ones belong to this user. See
+`decisions/006-redis-for-refresh-tokens.md`'s addendum for the trade-off this accepts.
+
 ---
 
 ### GET /auth/me
@@ -455,8 +462,11 @@ describe('AuthService.updateProfile', () => {
   notes; those users have no password to change and no UI for this should even be shown, but the
   API rejects it either way as a real boundary, not just a frontend nicety)
 - [ ] Hashes `newPassword` the same way `register` does (bcrypt, cost 12)
-- [ ] Does **not** revoke existing refresh tokens/sessions — logging out other devices after a
-  password change isn't designed yet; flagged, not silently done
+- [ ] Revokes every existing refresh token for the user (`refreshTokenRepo.deleteAllForUser`) —
+  logs the user out of all other sessions/devices. The access token already held by the current
+  client (or any other client) is **not** force-invalidated — same accepted trade-off as
+  `POST /auth/logout`'s "does not invalidate the access token" behavior, since access tokens are
+  short-lived (15 min) by design
 
 **Edge cases:**
 | Case | Expected behaviour | Status |
@@ -477,6 +487,7 @@ changePassword(userId, body):
   if !match → throw UnauthorizedError("Current password is incorrect")
   newHash = await bcrypt.hash(body.newPassword, 12)
   userRepo.update(userId, { passwordHash: newHash })
+  refreshTokenRepo.deleteAllForUser(userId)   // revokes every other session/device
   return ok(null, "Password updated")
 ```
 
@@ -484,9 +495,11 @@ changePassword(userId, body):
 ```typescript
 describe('AuthService.changePassword', () => {
   it('updates the password hash when current password is correct')
+  it('revokes all existing refresh tokens for the user after a successful change')
   it('throws UnauthorizedError when current password is incorrect')
   it('throws BadRequestError for a GitHub-only account with no passwordHash')
   it('hashes the new password with the same bcrypt cost as register')
+  it('does not revoke any refresh tokens when the password change fails')
 })
 ```
 

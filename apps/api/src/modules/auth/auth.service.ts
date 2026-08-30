@@ -194,6 +194,10 @@ export class AuthService implements IAuthService {
     }
     const newHash = await bcrypt.hash(input.newPassword, REGISTER_PASSWORD_BCRYPT_COST);
     await this.userRepo.update(userId, { passwordHash: newHash });
+    // Revoke every other session/device now that the old password (and any credential that
+    // relied on it) is no longer valid. Does not touch the caller's own current access token
+    // (15 min TTL) — same accepted trade-off as logout().
+    await this.refreshTokenRepo.deleteAllForUser(userId);
   }
 
   private async issueTokens(user: User): Promise<AuthTokensResult> {

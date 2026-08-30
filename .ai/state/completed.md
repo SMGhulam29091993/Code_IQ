@@ -1,6 +1,27 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-08-30 (Security fix: change-password now revokes all refresh tokens)
+- `codeiq29091993 Bot`'s automated PR review flagged (Critical/Security) that
+  `POST /auth/change-password` left every existing refresh token/session alive after a password
+  change — a documented, deliberately-deferred gap in `knowledge/domains/auth.md` since it was
+  first built. Closed it: `AuthService.changePassword` now calls a new
+  `IRefreshTokenRepository.deleteAllForUser(userId)` after updating `passwordHash`, revoking
+  every other session/device (the caller's own access token, 15 min TTL, is intentionally left
+  alone — same accepted trade-off `POST /auth/logout` already makes).
+- Since refresh tokens are Redis-backed (`refresh_token:<token>` → `userId`, ADR 006) with no
+  reverse index by user, `deleteAllForUser` does a cursor-based `SCAN … MATCH refresh_token:*` +
+  `MGET` + filter-by-value + `DEL` — the only key-pattern enumeration anywhere in this codebase
+  (every other Redis lookup is an exact key). A per-user Redis Set was considered and rejected:
+  it would reintroduce the "stale rows never cleaned up" problem ADR 006 moved off Postgres to
+  avoid, since naturally-expired tokens never remove themselves from a set. See ADR 006's new
+  2026-08-30 addendum and `knowledge/domains/auth.md`'s updated `POST /auth/change-password`
+  and refresh-token-storage sections.
+- New `refresh-token.repository.test.ts` (4 tests, mocks `../lib/redis` directly) covers the
+  SCAN/MGET/DEL logic in isolation (multi-page cursor, no matches, partial matches). Updated
+  `auth.service.test.ts` (+2 tests) and `auth.routes.test.ts` (+1 test) for the new call/mock.
+  Full suite verified: `pnpm typecheck`, `pnpm lint`, `pnpm test` (348/348) all pass clean.
+
 ## 2026-08-25 (Fix: Onboarding's "Install the GitHub App" 404'd)
 - User reported (with a screenshot of GitHub's own 404 page) that clicking "Install the GitHub
   App" on Onboarding led nowhere real. Two stacked bugs, not one:

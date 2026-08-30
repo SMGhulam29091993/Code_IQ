@@ -93,6 +93,11 @@ export interface IRefreshTokenRepository {
   // logout()'s ownership check needs.
   findByToken(token: string): Promise<{ userId: string } | null>;
   deleteByToken(token: string): Promise<void>;
+  // Revokes every refresh token belonging to this user — used by changePassword() to log out
+  // all other sessions/devices. No reverse index by userId exists (findByToken is a
+  // key-goes-in-token-lookup design), so this SCANs refresh_token:* rather than doing a direct
+  // key lookup — see refresh-token.repository.ts's implementation note.
+  deleteAllForUser(userId: string): Promise<void>;
 }
 
 export interface IOtpRepository {

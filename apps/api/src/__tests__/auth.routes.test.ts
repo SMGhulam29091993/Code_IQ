@@ -22,6 +22,8 @@ vi.mock("ioredis", () => ({
     get: vi.fn(),
     set: vi.fn(),
     del: vi.fn(),
+    scan: vi.fn().mockResolvedValue(["0", []]),
+    mget: vi.fn(),
     ping: vi.fn().mockResolvedValue("PONG"),
   })),
 }));
@@ -77,6 +79,8 @@ function mockRedis() {
     get: ReturnType<typeof vi.fn>;
     set: ReturnType<typeof vi.fn>;
     del: ReturnType<typeof vi.fn>;
+    scan: ReturnType<typeof vi.fn>;
+    mget: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -342,6 +346,29 @@ describe("Auth routes", () => {
 
       expect(res.status).toBe(200);
       expect(res.body.message).toBe("Password updated");
+    });
+
+    it("revokes every refresh token belonging to the user on success", async () => {
+      const accessToken = jwt.sign({ sub: "user-1" }, process.env.JWT_SECRET!, {
+        expiresIn: "15m",
+      });
+      const passwordHash = await bcrypt.hash("old-password", 4);
+      mockPrisma().user.findUnique.mockResolvedValue(buildUser({ passwordHash }));
+      mockPrisma().user.update.mockResolvedValueOnce({});
+      mockRedis().scan.mockResolvedValueOnce([
+        "0",
+        ["refresh_token:mine", "refresh_token:someone-elses"],
+      ]);
+      mockRedis().mget.mockResolvedValueOnce(["user-1", "user-2"]);
+
+      const res = await request(app)
+        .post("/api/auth/change-password")
+        .set("Authorization", `Bearer ${accessToken}`)
+        .send({ currentPassword: "old-password", newPassword: "new-password-123" });
+
+      expect(res.status).toBe(200);
+      expect(mockRedis().del).toHaveBeenCalledWith("refresh_token:mine");
+      expect(mockRedis().del).not.toHaveBeenCalledWith("refresh_token:someone-elses");
     });
 
     it("returns 401 when current password is incorrect", async () => {

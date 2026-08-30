@@ -83,6 +83,7 @@ describe("AuthService", () => {
       create: vi.fn(),
       findByToken: vi.fn(),
       deleteByToken: vi.fn(),
+      deleteAllForUser: vi.fn(),
     };
     otpRepo = {
       upsertForUser: vi.fn(),
@@ -528,6 +529,21 @@ describe("AuthService", () => {
       expect(await bcrypt.compare("new-password-123", newHash)).toBe(true);
     });
 
+    it("revokes all existing refresh tokens for the user after a successful change", async () => {
+      const currentHash = await bcrypt.hash("old-password", 4);
+      (userRepo.findById as ReturnType<typeof vi.fn>).mockResolvedValue(
+        buildUser({ passwordHash: currentHash })
+      );
+
+      await authService.changePassword("user-1", {
+        currentPassword: "old-password",
+        newPassword: "new-password-123",
+      });
+
+      expect(refreshTokenRepo.deleteAllForUser).toHaveBeenCalledWith("user-1");
+      expect(refreshTokenRepo.deleteAllForUser).toHaveBeenCalledTimes(1);
+    });
+
     it("throws UnauthorizedError when current password is incorrect", async () => {
       const currentHash = await bcrypt.hash("old-password", 4);
       (userRepo.findById as ReturnType<typeof vi.fn>).mockResolvedValue(
@@ -541,6 +557,7 @@ describe("AuthService", () => {
         })
       ).rejects.toBeInstanceOf(UnauthorizedError);
       expect(userRepo.update).not.toHaveBeenCalled();
+      expect(refreshTokenRepo.deleteAllForUser).not.toHaveBeenCalled();
     });
 
     it("throws BadRequestError for a GitHub-only account with no passwordHash", async () => {
@@ -555,6 +572,7 @@ describe("AuthService", () => {
         })
       ).rejects.toBeInstanceOf(BadRequestError);
       expect(userRepo.update).not.toHaveBeenCalled();
+      expect(refreshTokenRepo.deleteAllForUser).not.toHaveBeenCalled();
     });
   });
 });
