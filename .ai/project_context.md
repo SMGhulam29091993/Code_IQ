@@ -64,6 +64,7 @@ Turborepo monorepo
 | Frontend  | `knowledge/technical/frontend/state-conventions.md`         |
 | Frontend  | `knowledge/technical/frontend/component-conventions.md`     |
 | Frontend  | `knowledge/technical/frontend/hooks-and-utils.md`           |
+| Backend   | `knowledge/technical/backend/review-pipeline-scaling.md` — HLD/LLD for chunk-level fan-out (decision 007) |
 
 ## Workflows
 | Workflow                     | File                                           |
@@ -92,6 +93,7 @@ Turborepo monorepo
 - `decisions/004-nodemailer-factory-pattern-for-mail-service.md`
 - `decisions/005-pgvector-over-pinecone.md` *(future)*
 - `decisions/006-redis-for-refresh-tokens.md`
+- `decisions/007-chunk-level-fanout-review-pipeline.md`
 
 ## Memory
 - `memory/lessons.md`

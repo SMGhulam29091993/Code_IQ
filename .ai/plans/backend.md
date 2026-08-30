@@ -179,3 +179,32 @@
 - `apps/web` has no `public/` directory yet — the Dockerfile doesn't copy one; add that `COPY` back
   if/when one is added.
 - AWS provisioning is out of scope for local tooling — real infra, needs separate access/authorization.
+
+## Step 8 — Scalable review pipeline (chunk-level fan-out) [ not started ]
+
+> Design: `decisions/007-chunk-level-fanout-review-pipeline.md` +
+> `knowledge/technical/backend/review-pipeline-scaling.md` (full HLD/LLD). Raised because the
+> current single-BullMQ-job-per-PR pipeline head-of-line-blocks other tenants behind a large PR,
+> can't scale one PR's chunk parallelism past a single process, and re-does all Gemini calls on
+> retry. Ships in 4 phases, each independently verifiable, per the design doc.
+
+- [x] Phase 1 — `ReviewChunk` model + `Review.totalChunks/completedChunks/truncated` +
+  `ReviewIssue.chunkId`, migration only, no behavior change. Migration
+  `20260830063948_add_review_chunk_phase1`, applied to the live compose Postgres. Purely
+  additive (new nullable/defaulted columns + new table) — nothing reads/writes `ReviewChunk`
+  yet, `ReviewJobProcessor` unchanged. Two existing test fixtures (`review.job.test.ts`,
+  `review.service.test.ts`) updated to include the new `Review` fields Prisma's generated type
+  now requires. Also removed a stray empty `prisma/migrations/20260823095713_init 2` directory
+  (untracked, not part of git history — a leftover duplicate that was blocking `prisma migrate
+  dev` with a P3015 error unrelated to this change).
+  Verified: `pnpm --filter @codeiq/db build`, `pnpm --filter @codeiq/api typecheck`, `lint`, and
+  `test` (322/322) all pass clean; migration applied live via `prisma migrate dev`.
+- [ ] Phase 2 — `ReviewJobProcessor` persists `ReviewChunk` rows around each chunk's Gemini call
+  (still single-job execution); `retryReview` only re-runs non-`DONE` chunks
+- [ ] Phase 3 — Split into `review-chunk-queue` + `review-finalize-queue` via BullMQ
+  `FlowProducer`; fleet-wide Gemini rate limit via `Worker.limiter`; load-test against a real
+  large PR before rollout
+- [ ] Phase 4 — Per-installation fairness (`fairnessService`, priority scoring),
+  `MAX_CHUNKS_PER_REVIEW` truncation + prioritization, live progress wired into the dashboard
+- `knowledge/domains/review.md` gets updated to match actual behavior after each phase ships —
+  not before.

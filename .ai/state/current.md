@@ -57,6 +57,10 @@ that point:
 `plans/frontend.md` → Steps 3–9 [ complete ]
 `plans/backend.md` → Step 7: Deploy [ in-progress ] — Dockerfiles/compose/health done, AWS
 EC2/RDS/ElastiCache + Secrets Manager + prod webhook URL still open (unchanged this session)
+`plans/backend.md` → Step 8: Scalable review pipeline [ in-progress ] — Phase 1 (`ReviewChunk`
+model + `Review`/`ReviewIssue` schema additions, migration only, no behavior change) shipped
+2026-08-30. Phases 2–4 (chunk persistence in the existing job, queue split via `FlowProducer`,
+fairness/backpressure/live progress) not started — see `plans/backend.md` Step 8 for detail.
 
 ## Last updated
 2026-08-26 (mid-session pause, not a natural stopping point — see "Next action")
