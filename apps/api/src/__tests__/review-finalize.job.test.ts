@@ -28,6 +28,7 @@ function buildJob(overrides: Partial<ReviewFinalizeJobData> = {}): Job<ReviewFin
       prNumber: 42,
       prTitle: "Add feature",
       headSha: "sha123",
+      truncated: false,
       ...overrides,
     },
   } as Job<ReviewFinalizeJobData>;
@@ -166,6 +167,17 @@ describe("ReviewFinalizeJobProcessor.process", () => {
     expect(reviewRepo.update).toHaveBeenCalledWith(
       "review-1",
       expect.objectContaining({ status: "DONE", filesReviewed: 1 })
+    );
+  });
+
+  it("notes the per-review analysis limit in the summary when the review was truncated", async () => {
+    await processor.process(buildJob({ truncated: true }));
+
+    expect(commentService.postReview).toHaveBeenCalledWith(
+      fakeOctokit,
+      expect.objectContaining({
+        summary: expect.stringContaining("exceeded the per-review analysis limit"),
+      })
     );
   });
 });

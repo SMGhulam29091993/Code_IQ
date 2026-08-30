@@ -30,7 +30,8 @@ export class ReviewFinalizeJobProcessor {
   ) {}
 
   async process(job: Job<ReviewFinalizeJobData>): Promise<void> {
-    const { reviewId, installationId, owner, repo, prNumber, prTitle, headSha } = job.data;
+    const { reviewId, installationId, owner, repo, prNumber, prTitle, headSha, truncated } =
+      job.data;
 
     const allChunks = await this.reviewChunkRepo.findByReviewId(reviewId);
     const failedChunks = allChunks.filter((chunk) => chunk.status === "FAILED");
@@ -45,6 +46,9 @@ export class ReviewFinalizeJobProcessor {
 
     const allIssues = await this.reviewIssueRepo.findByReviewId(reviewId);
     let summary = await this.geminiService.summarizePR(prTitle, allIssues);
+    if (truncated) {
+      summary += `\n\n_This PR exceeded the per-review analysis limit — only the largest files were reviewed._`;
+    }
     if (failedChunks.length > 0) {
       summary += `\n\n_${failedChunks.length} file section(s) could not be analyzed after retries._`;
     }

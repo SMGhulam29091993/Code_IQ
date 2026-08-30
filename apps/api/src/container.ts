@@ -6,7 +6,9 @@ import { reviewFlowProducer } from "./jobs/queue";
 import { ReviewChunkJobProcessor } from "./jobs/review-chunk.job";
 import { ReviewCoordinatorJobProcessor } from "./jobs/review-coordinator.job";
 import { ReviewFinalizeJobProcessor } from "./jobs/review-finalize.job";
+import { FairnessService } from "./lib/fairness";
 import { geminiModel } from "./lib/gemini";
+import { redis } from "./lib/redis";
 import { stripeClient } from "./lib/stripe";
 import { AuthController } from "./modules/auth/auth.controller";
 import { AuthService } from "./modules/auth/auth.service";
@@ -102,13 +104,15 @@ const reviewChunkRepository = new ReviewChunkRepository();
 const diffService = new DiffService();
 const geminiService = new GeminiService(geminiModel);
 const commentService = new CommentService();
+const fairnessService = new FairnessService(redis);
 
 const reviewService = new ReviewService(
   reviewRepository,
   repoRepository,
   reviewChunkRepository,
   installationRepository,
-  configService
+  configService,
+  fairnessService
 );
 
 export const reviewController = new ReviewController(reviewService);
@@ -123,6 +127,7 @@ export const reviewCoordinatorJobProcessor = new ReviewCoordinatorJobProcessor(
   configService,
   diffService,
   reviewChunkRepository,
+  fairnessService,
   reviewFlowProducer
 );
 
@@ -130,7 +135,8 @@ export const reviewChunkJobProcessor = new ReviewChunkJobProcessor(
   reviewRepository,
   reviewIssueRepository,
   reviewChunkRepository,
-  geminiService
+  geminiService,
+  fairnessService
 );
 
 export const reviewFinalizeJobProcessor = new ReviewFinalizeJobProcessor(

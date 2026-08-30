@@ -25,6 +25,12 @@ export interface SanitizedReviewSummary {
   status: ReviewStatus;
   filesReviewed: number;
   createdAt: Date;
+  // Live progress (decisions/007 Phase 4) — completedChunks is UI-only and may not always be
+  // monotonic under chunk-job retries; poll while status is RUNNING for a coarse progress bar,
+  // never for correctness decisions.
+  totalChunks: number;
+  completedChunks: number;
+  truncated: boolean;
 }
 
 export interface SanitizedReview extends SanitizedReviewSummary {
@@ -94,6 +100,7 @@ export interface UpdateReviewInput {
   filesReviewed?: number;
   githubReviewId?: number;
   totalChunks?: number;
+  truncated?: boolean;
 }
 
 export interface CreateIssueInput {
@@ -205,6 +212,8 @@ export interface DiffFile {
   filename: string;
   patch?: string;
   status: string;
+  additions?: number;
+  deletions?: number;
 }
 
 export interface DiffChunk {
@@ -216,6 +225,21 @@ export interface DiffChunk {
 export interface IDiffService {
   filterFiles(files: DiffFile[], config: SanitizedRepoConfig): DiffFile[];
   chunkFiles(files: DiffFile[]): DiffChunk[];
+  // Sorts by additions+deletions descending — decisions/007 Phase 4's MAX_CHUNKS_PER_REVIEW
+  // truncation reviews the largest diffs first, since they're more likely to carry real issues
+  // than a one-line version bump.
+  prioritizeFiles(files: DiffFile[]): DiffFile[];
+}
+
+// Fleet-wide fair queuing (decisions/007 Phase 4) — a substitute for BullMQ Pro's paid
+// per-group rate limiting. Tracks each installation's currently-in-flight chunk count in Redis;
+// installations with many chunks already running get a lower BullMQ `priority` (numerically
+// higher = lower priority) for their next chunk jobs, so one tenant's huge PR can't starve
+// everyone else's small ones. See knowledge/technical/backend/review-pipeline-scaling.md "Why
+// fairness via priority score, not BullMQ Pro groups".
+export interface IFairnessService {
+  priorityFor(installationId: string): Promise<number>;
+  markInFlight(installationId: string, delta: number): Promise<void>;
 }
 
 export interface IGeminiService {
@@ -267,6 +291,7 @@ export interface ReviewCoordinatorJobData {
 export interface ReviewChunkJobData {
   reviewId: string;
   chunkId: string;
+  installationId: string;
   filename: string;
   patch: string;
   repoConfig: SanitizedRepoConfig;
@@ -283,4 +308,8 @@ export interface ReviewFinalizeJobData {
   prNumber: number;
   prTitle: string;
   headSha: string;
+  // Known at Flow-creation time (coordinator: just computed; retry: already on the Review row)
+  // — carried through rather than re-queried so the finalize job can note it in the summary
+  // without an extra DB round trip.
+  truncated: boolean;
 }

@@ -1,5 +1,6 @@
 import type { Job } from "bullmq";
 import type {
+  IFairnessService,
   IGeminiService,
   IReviewChunkRepository,
   IReviewIssueRepository,
@@ -21,13 +22,15 @@ export class ReviewChunkJobProcessor {
     private readonly reviewRepo: IReviewRepository,
     private readonly reviewIssueRepo: IReviewIssueRepository,
     private readonly reviewChunkRepo: IReviewChunkRepository,
-    private readonly geminiService: IGeminiService
+    private readonly geminiService: IGeminiService,
+    private readonly fairnessService: IFairnessService
   ) {}
 
   async process(job: Job<ReviewChunkJobData>): Promise<void> {
-    const { reviewId, chunkId, filename, patch, repoConfig } = job.data;
+    const { reviewId, chunkId, installationId, filename, patch, repoConfig } = job.data;
 
     await this.reviewChunkRepo.markRunning(chunkId);
+    await this.fairnessService.markInFlight(installationId, 1);
     try {
       const result = await this.geminiService.reviewDiff(patch, repoConfig, filename);
       await this.reviewIssueRepo.createMany(
@@ -44,6 +47,7 @@ export class ReviewChunkJobProcessor {
       // counter for its DONE/FAILED gate; it re-queries real ReviewChunk rows instead. See
       // knowledge/technical/backend/review-pipeline-scaling.md.
       await this.reviewRepo.incrementCompletedChunks(reviewId);
+      await this.fairnessService.markInFlight(installationId, -1);
     }
   }
 }

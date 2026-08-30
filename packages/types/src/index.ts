@@ -108,6 +108,11 @@ export interface ReviewSummary {
   status: ReviewStatus;
   filesReviewed: number;
   createdAt: string;
+  // Live progress (decisions/007 Phase 4) — completedChunks is UI-only, safe to poll while
+  // status is RUNNING for a coarse progress bar, not a source of truth for correctness.
+  totalChunks: number;
+  completedChunks: number;
+  truncated: boolean;
 }
 
 // Matches apps/api/src/modules/reviews/review.types.ts SanitizedReview.

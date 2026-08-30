@@ -9,6 +9,7 @@ import type {
   DiffChunk,
   DiffFile,
   IDiffService,
+  IFairnessService,
   IReviewChunkRepository,
   IReviewRepository,
   ReviewChunkRow,
@@ -78,6 +79,7 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
   let configService: ConfigService;
   let diffService: IDiffService;
   let reviewChunkRepo: IReviewChunkRepository;
+  let fairnessService: IFairnessService;
   let flowProducer: FlowProducer;
   let processor: ReviewCoordinatorJobProcessor;
   let nextChunkId: number;
@@ -109,6 +111,7 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
     configService = { getEffectiveConfig: vi.fn().mockResolvedValue(DEFAULT_CONFIG) } as unknown as ConfigService;
     diffService = {
       filterFiles: vi.fn().mockImplementation((files: DiffFile[]) => files),
+      prioritizeFiles: vi.fn().mockImplementation((files: DiffFile[]) => files),
       chunkFiles: vi.fn().mockImplementation((files: DiffFile[]) =>
         files.map((f): DiffChunk => ({ filename: f.filename, patch: f.patch ?? "", chunkIndex: 0 }))
       ),
@@ -133,6 +136,10 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
       markDone: vi.fn(),
       markFailed: vi.fn(),
     };
+    fairnessService = {
+      priorityFor: vi.fn().mockResolvedValue(1),
+      markInFlight: vi.fn(),
+    };
     flowProducer = { add: vi.fn() } as unknown as FlowProducer;
 
     fakeOctokit.pulls.listFiles.mockResolvedValue({ data: [buildDiffFile()] });
@@ -143,6 +150,7 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
       configService,
       diffService,
       reviewChunkRepo,
+      fairnessService,
       flowProducer
     );
   });
@@ -203,7 +211,7 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
         expect.objectContaining({ filename: "b.ts" }),
       ])
     );
-    expect(reviewRepo.update).toHaveBeenCalledWith("review-1", { totalChunks: 2 });
+    expect(reviewRepo.update).toHaveBeenCalledWith("review-1", { totalChunks: 2, truncated: false });
   });
 
   it("fans out one review-chunk job per chunk under a finalize-review parent", async () => {
@@ -220,6 +228,7 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
         prNumber: 42,
         prTitle: "Add feature",
         headSha: "sha123",
+        truncated: false,
       },
       children: [
         {
@@ -228,12 +237,14 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
           data: {
             reviewId: "review-1",
             chunkId: "chunk-1",
+            installationId: "install-1",
             filename: "src/index.ts",
             patch: "@@ -1 +1 @@",
             repoConfig: DEFAULT_CONFIG,
           },
           opts: {
             jobId: "review-1:chunk-1",
+            priority: 1,
             attempts: 3,
             backoff: { type: "exponential", delay: 2000 },
             failParentOnFailure: false,
@@ -241,5 +252,32 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
         },
       ],
     });
+  });
+
+  it("truncates to MAX_CHUNKS_PER_REVIEW and marks the review truncated when a PR produces more chunks than the cap", async () => {
+    const files = Array.from({ length: 3 }, (_, i) => buildDiffFile({ filename: `f${i}.ts` }));
+    fakeOctokit.pulls.listFiles.mockResolvedValue({ data: files });
+    // Force chunkFiles to fan a single file out into many chunks so 3 files comfortably exceed
+    // a small test cap without needing 200+ fixture files.
+    vi.mocked(diffService.chunkFiles).mockImplementation((fs: DiffFile[]) =>
+      fs.flatMap((f) =>
+        Array.from({ length: 100 }, (_, i): DiffChunk => ({ filename: f.filename, patch: "p", chunkIndex: i }))
+      )
+    );
+
+    await processor.process(buildJob());
+
+    // 3 files * 100 chunks = 300, which exceeds the real MAX_CHUNKS_PER_REVIEW (200).
+    expect(reviewRepo.update).toHaveBeenCalledWith("review-1", { totalChunks: 200, truncated: true });
+    const flowCall = vi.mocked(flowProducer.add).mock.calls[0]![0] as { children: unknown[] };
+    expect(flowCall.children).toHaveLength(200);
+  });
+
+  it("prioritizes the largest diffs before chunking", async () => {
+    await processor.process(buildJob());
+
+    expect(diffService.prioritizeFiles).toHaveBeenCalledWith([
+      expect.objectContaining({ filename: "src/index.ts" }),
+    ]);
   });
 });

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ReviewChunkJobProcessor } from "../jobs/review-chunk.job";
 import type { SanitizedRepoConfig } from "../modules/repos/repo.types";
 import type {
+  IFairnessService,
   IGeminiService,
   IReviewChunkRepository,
   IReviewIssueRepository,
@@ -23,6 +24,7 @@ function buildJob(overrides: Partial<ReviewChunkJobData> = {}): Job<ReviewChunkJ
     data: {
       reviewId: "review-1",
       chunkId: "chunk-1",
+      installationId: "install-1",
       filename: "a.ts",
       patch: "@@ -1 +1 @@",
       repoConfig: DEFAULT_CONFIG,
@@ -36,6 +38,7 @@ describe("ReviewChunkJobProcessor.process", () => {
   let reviewIssueRepo: IReviewIssueRepository;
   let reviewChunkRepo: IReviewChunkRepository;
   let geminiService: IGeminiService;
+  let fairnessService: IFairnessService;
   let processor: ReviewChunkJobProcessor;
 
   beforeEach(() => {
@@ -70,7 +73,15 @@ describe("ReviewChunkJobProcessor.process", () => {
       summarizePR: vi.fn(),
     };
 
-    processor = new ReviewChunkJobProcessor(reviewRepo, reviewIssueRepo, reviewChunkRepo, geminiService);
+    fairnessService = { priorityFor: vi.fn().mockResolvedValue(1), markInFlight: vi.fn() };
+
+    processor = new ReviewChunkJobProcessor(
+      reviewRepo,
+      reviewIssueRepo,
+      reviewChunkRepo,
+      geminiService,
+      fairnessService
+    );
   });
 
   it("marks the chunk RUNNING before calling Gemini", async () => {
@@ -117,5 +128,17 @@ describe("ReviewChunkJobProcessor.process", () => {
     vi.mocked(geminiService.reviewDiff).mockRejectedValue(new Error("down"));
     await expect(processor.process(buildJob())).rejects.toThrow();
     expect(reviewRepo.incrementCompletedChunks).toHaveBeenCalledWith("review-1");
+  });
+
+  it("marks the installation in flight around the Gemini call, on success or failure", async () => {
+    await processor.process(buildJob());
+    expect(fairnessService.markInFlight).toHaveBeenNthCalledWith(1, "install-1", 1);
+    expect(fairnessService.markInFlight).toHaveBeenNthCalledWith(2, "install-1", -1);
+
+    vi.clearAllMocks();
+    vi.mocked(geminiService.reviewDiff).mockRejectedValue(new Error("down"));
+    await expect(processor.process(buildJob())).rejects.toThrow();
+    expect(fairnessService.markInFlight).toHaveBeenNthCalledWith(1, "install-1", 1);
+    expect(fairnessService.markInFlight).toHaveBeenNthCalledWith(2, "install-1", -1);
   });
 });

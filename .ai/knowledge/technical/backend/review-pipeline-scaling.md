@@ -1,9 +1,10 @@
 # Review Pipeline Scaling — HLD & LLD
 > Full design behind [decisions/007](../../decisions/007-chunk-level-fanout-review-pipeline.md).
-> Read that ADR first for the *why*; this doc is the *how*. Phases 1–3 are implemented (see
-> "Migration phases" at the bottom); real behavior now lives in
-> `knowledge/domains/review.md` "Core pipeline" — this doc stays the design record. Phase 4 not
-> started. See `plans/backend.md` Step 8 for status.
+> Read that ADR first for the *why*; this doc is the *how*. All 4 phases are implemented
+> backend-side (see "Migration phases" at the bottom); real behavior now lives in
+> `knowledge/domains/review.md` "Core pipeline" — this doc stays the design record. Not yet
+> load-tested against a real large PR, and Phase 4's dashboard UI wiring is still open (frontend,
+> tracked separately). See `plans/backend.md` Step 8 for status.
 
 ## Design goals
 1. Large-PR latency scales with fleet capacity, not with one process's in-memory pool.
@@ -338,10 +339,16 @@ list — that doc, not this one, is now the source of truth for pipeline *behavi
 actual partial-chunk-failure conditions is still open before this is trusted at scale in
 production.
 
-### Phase 4 — Fairness + backpressure + live progress
-Per-installation priority scoring (`fairnessService`), `MAX_CHUNKS_PER_REVIEW` truncation, and
-wiring `completedChunks`/`totalChunks` into the dashboard (poll `GET /reviews/:reviewId` more
-frequently while RUNNING, or a future SSE/WebSocket channel — no decision made yet on which).
+### Phase 4 — Fairness + backpressure + live progress [ shipped 2026-08-30, backend only ]
+Per-installation priority scoring (`FairnessService`, `lib/fairness.ts` — Redis in-flight
+counter → BullMQ `priority`), `MAX_CHUNKS_PER_REVIEW` (200) truncation +
+`DiffService.prioritizeFiles` in the coordinator, and the API side of live progress:
+`SanitizedReviewSummary`/`packages/types` `ReviewSummary` now carry `totalChunks`/
+`completedChunks`/`truncated`. **Not done**: actually wiring `completedChunks`/`totalChunks`
+into the dashboard UI (poll `GET /reviews/:reviewId` more frequently while RUNNING, or a future
+SSE/WebSocket channel — still no decision on which) — that's a frontend step, tracked separately,
+not part of this backend-scoped pass. Also not done: a real load test with a 200+-chunk PR to
+confirm truncation and fairness behave as designed end-to-end.
 
 Each phase needs `knowledge/domains/review.md` updated to match (pseudocode there currently
 describes today's single-job pipeline) once actually built — not before, per this project's

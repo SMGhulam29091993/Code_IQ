@@ -5,10 +5,18 @@ import type { ConfigService } from "../modules/repos/config.service";
 import { resolveReviewContext } from "../modules/reviews/resolve-review-context";
 import type {
   IDiffService,
+  IFairnessService,
   IReviewChunkRepository,
   IReviewRepository,
   ReviewCoordinatorJobData,
 } from "../modules/reviews/review.types";
+
+// Hard ceiling on chunks reviewed per PR (decisions/007 Phase 4 backpressure) — a pathological
+// PR (thousands of files, e.g. a vendor bump) gets a bounded cost/time instead of enqueueing an
+// unbounded number of Gemini calls. The largest diffs (by additions+deletions) are kept —
+// diffService.prioritizeFiles — since they're more likely to carry real issues than a one-line
+// version bump; Review.truncated records that it happened.
+const MAX_CHUNKS_PER_REVIEW = 200;
 
 // decisions/007 Phase 3: the coordinator's whole job is "get to a fanned-out Flow as fast as
 // possible" — fetch diff, filter, chunk, persist ReviewChunk rows, hand off to
@@ -25,6 +33,7 @@ export class ReviewCoordinatorJobProcessor {
     private readonly configService: ConfigService,
     private readonly diffService: IDiffService,
     private readonly reviewChunkRepo: IReviewChunkRepository,
+    private readonly fairnessService: IFairnessService,
     private readonly flowProducer: FlowProducer
   ) {}
 
@@ -65,12 +74,23 @@ export class ReviewCoordinatorJobProcessor {
         return;
       }
 
-      // 6. Chunk each file's diff and persist a ReviewChunk row (PENDING) per chunk *before*
-      // fanning out — a crash between here and the flowProducer.add below leaves chunks a retry
-      // can still discover and resume via findIncomplete.
-      const chunks = this.diffService.chunkFiles(filesToReview);
+      // 6. Chunk the largest diffs first (diffService.prioritizeFiles) and persist a ReviewChunk
+      // row (PENDING) per chunk *before* fanning out — a crash between here and the
+      // flowProducer.add below leaves chunks a retry can still discover via findIncomplete.
+      // Truncate to MAX_CHUNKS_PER_REVIEW if the PR produced more chunks than that.
+      let chunks = this.diffService.chunkFiles(this.diffService.prioritizeFiles(filesToReview));
+      let truncated = false;
+      if (chunks.length > MAX_CHUNKS_PER_REVIEW) {
+        chunks = chunks.slice(0, MAX_CHUNKS_PER_REVIEW);
+        truncated = true;
+      }
       const chunkRows = await this.reviewChunkRepo.createMany(review.id, chunks);
-      await this.reviewRepo.update(review.id, { totalChunks: chunkRows.length });
+      await this.reviewRepo.update(review.id, { totalChunks: chunkRows.length, truncated });
+
+      // Per-installation fairness (decisions/007 Phase 4): an installation with many chunks
+      // already in flight gets a lower BullMQ priority for its next chunk jobs, so one tenant's
+      // huge PR can't starve everyone else's small ones.
+      const priority = await this.fairnessService.priorityFor(installationId);
 
       // 7. Fan out: one review-chunk job per chunk, under a review-finalize parent that BullMQ
       // activates automatically once every child has settled. failParentOnFailure: false means
@@ -79,19 +99,21 @@ export class ReviewCoordinatorJobProcessor {
       await this.flowProducer.add({
         name: "finalize-review",
         queueName: REVIEW_FINALIZE_QUEUE_NAME,
-        data: { reviewId: review.id, installationId, owner, repo, prNumber, prTitle, headSha },
+        data: { reviewId: review.id, installationId, owner, repo, prNumber, prTitle, headSha, truncated },
         children: chunkRows.map((row) => ({
           name: "review-chunk",
           queueName: REVIEW_CHUNK_QUEUE_NAME,
           data: {
             reviewId: review.id,
             chunkId: row.id,
+            installationId,
             filename: row.filename,
             patch: row.patch,
             repoConfig,
           },
           opts: {
             jobId: `${review.id}:${row.id}`,
+            priority,
             attempts: 3,
             backoff: { type: "exponential", delay: 2000 },
             failParentOnFailure: false,

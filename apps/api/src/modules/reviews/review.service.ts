@@ -3,6 +3,7 @@ import { resolveReviewContext } from "./resolve-review-context";
 import type {
   GetReviewResult,
   GetStatsFilters,
+  IFairnessService,
   IReviewChunkRepository,
   IReviewRepository,
   IReviewService,
@@ -30,7 +31,8 @@ export class ReviewService implements IReviewService {
     private readonly repoRepo: IRepoRepository,
     private readonly reviewChunkRepo: IReviewChunkRepository,
     private readonly installationRepo: IInstallationRepository,
-    private readonly configService: ConfigService
+    private readonly configService: ConfigService,
+    private readonly fairnessService: IFairnessService
   ) {}
 
   async listReviews(userId: string, filters: ListReviewsFilters): Promise<ListReviewsResult> {
@@ -79,6 +81,7 @@ export class ReviewService implements IReviewService {
         this.installationRepo,
         this.configService
       );
+      const priority = await this.fairnessService.priorityFor(repo.installationId);
 
       await reviewFlowProducer.add({
         name: "finalize-review",
@@ -91,6 +94,7 @@ export class ReviewService implements IReviewService {
           prNumber: review.prNumber,
           prTitle: review.prTitle,
           headSha: review.headSha,
+          truncated: review.truncated,
         },
         children: incomplete.map((chunk) => ({
           name: "review-chunk",
@@ -98,6 +102,7 @@ export class ReviewService implements IReviewService {
           data: {
             reviewId,
             chunkId: chunk.id,
+            installationId: repo.installationId,
             filename: chunk.filename,
             patch: chunk.patch,
             repoConfig,
@@ -108,6 +113,7 @@ export class ReviewService implements IReviewService {
             // id to run again. `attempts` (already incremented by every prior run of this
             // chunk) makes each retry generation's id unique even across repeated retries.
             jobId: `${reviewId}:${chunk.id}:retry${chunk.attempts}`,
+            priority,
             attempts: 3,
             backoff: { type: "exponential", delay: 2000 },
             failParentOnFailure: false,
@@ -189,6 +195,9 @@ function sanitizeReviewSummary(review: Review): SanitizedReviewSummary {
     status: review.status as ReviewStatus,
     filesReviewed: review.filesReviewed,
     createdAt: review.createdAt,
+    totalChunks: review.totalChunks,
+    completedChunks: review.completedChunks,
+    truncated: review.truncated,
   };
 }
 

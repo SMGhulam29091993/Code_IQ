@@ -7,6 +7,7 @@ import type { ConfigService } from "../modules/repos/config.service";
 import type { IRepoRepository, RepoWithConfigAndOwner, SanitizedRepoConfig } from "../modules/repos/repo.types";
 import { ReviewService } from "../modules/reviews/review.service";
 import type {
+  IFairnessService,
   IReviewChunkRepository,
   IReviewRepository,
   ReviewChunkRow,
@@ -98,6 +99,7 @@ describe("ReviewService", () => {
   let reviewChunkRepo: IReviewChunkRepository;
   let installationRepo: IInstallationRepository;
   let configService: ConfigService;
+  let fairnessService: IFairnessService;
   let service: ReviewService;
 
   beforeEach(() => {
@@ -143,8 +145,16 @@ describe("ReviewService", () => {
     configService = {
       getEffectiveConfig: vi.fn().mockResolvedValue(DEFAULT_CONFIG),
     } as unknown as ConfigService;
+    fairnessService = { priorityFor: vi.fn().mockResolvedValue(1), markInFlight: vi.fn() };
 
-    service = new ReviewService(reviewRepo, repoRepo, reviewChunkRepo, installationRepo, configService);
+    service = new ReviewService(
+      reviewRepo,
+      repoRepo,
+      reviewChunkRepo,
+      installationRepo,
+      configService,
+      fairnessService
+    );
   });
 
   describe("listReviews", () => {
@@ -308,12 +318,36 @@ describe("ReviewService", () => {
           expect.objectContaining({
             name: "review-chunk",
             queueName: "review-chunk-queue",
-            data: expect.objectContaining({ reviewId: "review-1", chunkId: "chunk-1", filename: "a.ts" }),
-            opts: expect.objectContaining({ jobId: "review-1:chunk-1:retry1", failParentOnFailure: false }),
+            data: expect.objectContaining({
+              reviewId: "review-1",
+              chunkId: "chunk-1",
+              installationId: "install-1",
+              filename: "a.ts",
+            }),
+            opts: expect.objectContaining({
+              jobId: "review-1:chunk-1:retry1",
+              priority: 1,
+              failParentOnFailure: false,
+            }),
           }),
         ],
       });
       expect(result.review.status).toBe("RUNNING");
+    });
+
+    it("scores priority from the installation's current in-flight chunk count", async () => {
+      vi.mocked(reviewRepo.findById).mockResolvedValue(buildOwnedReview({ status: "FAILED" }));
+      vi.mocked(repoRepo.findByIdForUser).mockResolvedValue(buildOwnedRepo());
+      vi.mocked(reviewRepo.update).mockResolvedValue(buildReview({ status: "RUNNING" }));
+      vi.mocked(fairnessService.priorityFor).mockResolvedValue(7);
+
+      await service.retryReview("user-1", "review-1");
+
+      expect(fairnessService.priorityFor).toHaveBeenCalledWith("install-1");
+      const call = vi.mocked(reviewFlowProducer.add).mock.calls[0]![0] as {
+        children: Array<{ opts: { priority: number } }>;
+      };
+      expect(call.children[0]!.opts.priority).toBe(7);
     });
 
     it("never re-runs a chunk that already reached DONE", async () => {

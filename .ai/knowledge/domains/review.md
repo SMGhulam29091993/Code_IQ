@@ -29,6 +29,9 @@ Also owns the review history endpoints for the dashboard.
 - [ ] Supports filtering by `repoId` and `status`
 - [ ] Returns review summary fields (not full transcript — use GET /reviews/:id for that)
 - [ ] Returns total count for pagination UI
+- [ ] Each review includes `totalChunks`/`completedChunks` (live progress, decisions/007 Phase 4
+  — UI-only, poll while `status` is `RUNNING` for a coarse progress bar) and `truncated`
+  (whether `MAX_CHUNKS_PER_REVIEW` cut this PR down to its largest files)
 
 **Response shape:**
 ```typescript
@@ -208,22 +211,34 @@ processCoordinatorJob(job):
     reviewRepo.update(review.id, { status: 'DONE', summary: 'No reviewable files in this PR.', filesReviewed: 0 })
     return
 
-  // 6. Chunk each file's diff and persist a ReviewChunk row (PENDING) per chunk *before*
-  // fanning out — a crash here still leaves chunks a retry can discover via findIncomplete.
-  chunks = diffService.chunkFiles(filesToReview)
+  // 6. Chunk the largest diffs first (diffService.prioritizeFiles — additions+deletions desc)
+  // and persist a ReviewChunk row (PENDING) per chunk *before* fanning out — a crash here still
+  // leaves chunks a retry can discover via findIncomplete. Truncate to MAX_CHUNKS_PER_REVIEW
+  // (200) if the PR produced more chunks than that — a pathological PR (thousands of files)
+  // gets a bounded cost/time instead of an unbounded number of Gemini calls.
+  chunks = diffService.chunkFiles(diffService.prioritizeFiles(filesToReview))
+  truncated = false
+  if chunks.length > MAX_CHUNKS_PER_REVIEW:
+    chunks = chunks.slice(0, MAX_CHUNKS_PER_REVIEW)
+    truncated = true
   chunkRows = reviewChunkRepo.createMany(review.id, chunks)
-  reviewRepo.update(review.id, { totalChunks: chunkRows.length })
+  reviewRepo.update(review.id, { totalChunks: chunkRows.length, truncated })
+
+  // Per-installation fairness: an installation with many chunks already in flight gets a lower
+  // BullMQ priority for its next chunk jobs, so one tenant's huge PR can't starve everyone
+  // else's small ones. See fairnessService below.
+  priority = await fairnessService.priorityFor(installationId)
 
   // 7. Fan out: one review-chunk job per chunk under a review-finalize parent. BullMQ activates
   // the parent automatically once every child has settled; failParentOnFailure: false means one
   // chunk exhausting its own retries doesn't block finalization.
   await flowProducer.add({
     name: 'finalize-review', queueName: 'review-finalize-queue',
-    data: { reviewId: review.id, installationId, owner, repo, prNumber, prTitle, headSha },
+    data: { reviewId: review.id, installationId, owner, repo, prNumber, prTitle, headSha, truncated },
     children: chunkRows.map(row => ({
       name: 'review-chunk', queueName: 'review-chunk-queue',
-      data: { reviewId: review.id, chunkId: row.id, filename: row.filename, patch: row.patch, repoConfig },
-      opts: { jobId: `${review.id}:${row.id}`, attempts: 3, backoff: { type: 'exponential', delay: 2000 }, failParentOnFailure: false },
+      data: { reviewId: review.id, chunkId: row.id, installationId, filename: row.filename, patch: row.patch, repoConfig },
+      opts: { jobId: `${review.id}:${row.id}`, priority, attempts: 3, backoff: { type: 'exponential', delay: 2000 }, failParentOnFailure: false },
     })),
   })
 
@@ -242,9 +257,10 @@ to matter.
 
 ```
 processChunkJob(job):
-  { reviewId, chunkId, filename, patch, repoConfig } = job.data
+  { reviewId, chunkId, installationId, filename, patch, repoConfig } = job.data
 
   reviewChunkRepo.markRunning(chunkId)
+  fairnessService.markInFlight(installationId, +1)
   try:
     result = await geminiService.reviewDiff(patch, repoConfig, filename)
     reviewIssueRepo.createMany(reviewId, result.issues.map(issue => ({ ...issue, file: filename, chunkId })))
@@ -257,6 +273,7 @@ processChunkJob(job):
     reviewRepo.incrementCompletedChunks(reviewId)  // UI progress only — may over-count across
                                                      // this job's own retries; never trusted for
                                                      // the finalize job's DONE/FAILED gate
+    fairnessService.markInFlight(installationId, -1)
 ```
 
 ### 3. review-finalize.job.ts — `ReviewFinalizeJobProcessor` (`review-finalize-queue`)
@@ -268,7 +285,7 @@ attempt), posts the single GitHub review, and marks the review DONE/FAILED.
 
 ```
 processFinalizeJob(job):
-  { reviewId, installationId, owner, repo, prNumber, prTitle, headSha } = job.data
+  { reviewId, installationId, owner, repo, prNumber, prTitle, headSha, truncated } = job.data
 
   allChunks = reviewChunkRepo.findByReviewId(reviewId)
   failedChunks = allChunks.filter(c => c.status === 'FAILED')
@@ -279,6 +296,8 @@ processFinalizeJob(job):
 
   allIssues = reviewIssueRepo.findByReviewId(reviewId)
   summary = await geminiService.summarizePR(prTitle, allIssues)
+  if truncated:
+    summary += `\n\n_This PR exceeded the per-review analysis limit — only the largest files were reviewed._`
   if failedChunks.length > 0:
     summary += `\n\n_${failedChunks.length} file section(s) could not be analyzed after retries._`
 
@@ -293,22 +312,37 @@ processFinalizeJob(job):
   })
 ```
 
+### fairnessService (`lib/fairness.ts`) — per-installation fair queuing (decisions/007 Phase 4)
+
+Substitute for BullMQ Pro's paid per-group rate limiting: track each installation's currently
+in-flight chunk count in Redis (`chunks:inflight:${installationId}`, `INCR`/`DECR` around each
+chunk job, 300s TTL as a safety net against a crashed pod leaking the counter), and set that
+installation's next chunk jobs' BullMQ `priority` from it — one priority tier lower (numerically
+higher = lower priority in BullMQ) per 20 in-flight chunks, clamped to `[1, 10]`. An installation
+with nothing in flight stays at the top tier; a huge PR gradually cedes ground to quieter tenants.
+See `knowledge/technical/backend/review-pipeline-scaling.md` "Why fairness via priority score,
+not BullMQ Pro groups".
+
 ### Retry (`POST /reviews/:reviewId/retry`)
 
 `ReviewService.retryReview` never touches `review-coordinator-queue` — a retry's chunks (and
 their already-persisted patches) are already known, so it resolves repo context once
-(`resolve-review-context.ts`, same helper the coordinator uses) and calls `reviewFlowProducer.add`
-directly with only the review's incomplete (`PENDING`/`FAILED`) `ReviewChunk` rows as children.
-Each child gets a fresh `jobId` (`${reviewId}:${chunkId}:retry${chunk.attempts}`) since the
-chunk's original job id is already terminal in BullMQ. A `DONE` chunk is never in the incomplete
-list, so it's never re-run and never re-billed.
+(`resolve-review-context.ts`, same helper the coordinator uses), scores priority via
+`fairnessService.priorityFor`, and calls `reviewFlowProducer.add` directly with only the review's
+incomplete (`PENDING`/`FAILED`) `ReviewChunk` rows as children. Each child gets a fresh `jobId`
+(`${reviewId}:${chunkId}:retry${chunk.attempts}`) since the chunk's original job id is already
+terminal in BullMQ. A `DONE` chunk is never in the incomplete list, so it's never re-run and
+never re-billed. `truncated` on the finalize job's data comes straight from the `Review` row
+already loaded — a retry never re-runs the truncation decision, only the coordinator does that.
 
 ### Edge cases in the review pipeline:
 | Case | Handling |
 |------|----------|
 | PR has 0 reviewable files after filtering | Coordinator marks DONE with note, no fan-out, no GitHub comment |
+| PR produces more chunks than `MAX_CHUNKS_PER_REVIEW` (200) | Coordinator keeps the largest-diff chunks (`diffService.prioritizeFiles`), marks `Review.truncated = true`; finalize appends a note to the summary |
 | A Gemini chunk call fails (after its own retries) | That chunk stays FAILED; finalize still posts the DONE chunks' issues, with a note about the gap |
 | ALL chunks fail | Finalize marks review FAILED without posting to GitHub |
+| One installation has many chunks in flight | `fairnessService` lowers that installation's next chunk jobs' BullMQ priority — doesn't block them, just deprioritizes relative to quieter installations |
 | GitHub rate limit hit (403) | BullMQ retry with exponential backoff (whichever job made the call) |
 | PR deleted before review finishes | GitHub API returns 404 — mark DONE, log warning |
 | Gemini returns malformed JSON | Zod parse fails → chunk job throws → chunk marked FAILED |
@@ -330,6 +364,8 @@ describe('ReviewCoordinatorJobProcessor.process', () => {
   it('marks DONE with no-issues summary when all files are filtered out, without fanning out')
   it('persists a ReviewChunk row per chunk and records totalChunks before fanning out')
   it('fans out one review-chunk job per chunk under a finalize-review parent')
+  it('truncates to MAX_CHUNKS_PER_REVIEW and marks the review truncated when a PR produces more chunks than the cap')
+  it('prioritizes the largest diffs before chunking')
 })
 
 describe('ReviewChunkJobProcessor.process', () => {
@@ -339,6 +375,7 @@ describe('ReviewChunkJobProcessor.process', () => {
   it('marks the chunk DONE on success')
   it('marks the chunk FAILED and rethrows (so BullMQ retries) when Gemini fails')
   it('increments completedChunks whether the chunk succeeds or fails')
+  it('marks the installation in flight around the Gemini call, on success or failure')
 })
 
 describe('ReviewFinalizeJobProcessor.process', () => {
@@ -346,6 +383,16 @@ describe('ReviewFinalizeJobProcessor.process', () => {
   it('marks the review DONE with distinct-filename filesReviewed and the githubReviewId')
   it('marks the review FAILED without posting when every chunk failed')
   it('still posts and marks DONE on a partial failure, noting the gap in the summary')
+  it('notes the per-review analysis limit in the summary when the review was truncated')
+})
+
+describe('FairnessService', () => {
+  it('returns the highest priority (1) when nothing is in flight')
+  it('drops one priority tier per 20 in-flight chunks')
+  it('clamps at the lowest priority (10) for very high in-flight counts')
+  it('scopes the in-flight key to the installation')
+  it('increments the installation\'s counter and refreshes its TTL')
+  it('supports decrementing when a chunk finishes')
 })
 ```
 
@@ -383,7 +430,17 @@ chunkFiles(files):
   return chunks
 ```
 
+### prioritizeFiles pseudocode (decisions/007 Phase 4)
+```
+prioritizeFiles(files):
+  return [...files].sort((a, b) => diffSize(b) - diffSize(a))
+  // diffSize(file) = (file.additions ?? 0) + (file.deletions ?? 0)
+```
+Used by the coordinator job to chunk the largest diffs first, so a `MAX_CHUNKS_PER_REVIEW`
+truncation keeps the files most likely to carry real issues.
+
 ### Unit test cases for diff.service.ts:
+
 ```typescript
 describe('DiffService.filterFiles', () => {
   it('excludes binary files (no patch property)')
@@ -392,6 +449,12 @@ describe('DiffService.filterFiles', () => {
   it('includes files not matching any ignore pattern')
   it('handles empty ignore patterns list')
   it('uses glob matching for patterns (e.g. "*.test.ts")')
+})
+
+describe('DiffService.prioritizeFiles', () => {
+  it('sorts files by additions+deletions descending')
+  it('treats files with no additions/deletions info as size 0')
+  it('does not mutate the input array')
 })
 
 describe('DiffService.chunkFiles', () => {

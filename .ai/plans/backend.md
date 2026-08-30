@@ -231,7 +231,26 @@
   against a real large PR** — that and confirming `failParentOnFailure: false` under real
   partial-chunk-failure conditions are still open before trusting this at scale in production
   (see `knowledge/technical/backend/review-pipeline-scaling.md` Phase 3 note).
-- [ ] Phase 4 — Per-installation fairness (`fairnessService`, priority scoring),
-  `MAX_CHUNKS_PER_REVIEW` truncation + prioritization, live progress wired into the dashboard
+- [x] Phase 4 — Per-installation fairness (`fairnessService`, priority scoring),
+  `MAX_CHUNKS_PER_REVIEW` truncation + prioritization, and the backend half of live progress
+  (API fields; dashboard UI wiring is a separate, not-yet-scheduled frontend step — see note
+  below). New `FairnessService` (`lib/fairness.ts`) — Redis `chunks:inflight:${installationId}`
+  counter (`INCR`/`DECR`, 300s TTL safety net), `priorityFor` returns a BullMQ `priority` 1–10
+  (one tier lower per 20 in-flight chunks). Wired into `ReviewCoordinatorJobProcessor` and
+  `ReviewService.retryReview` (score priority before fanning out) and
+  `ReviewChunkJobProcessor` (`markInFlight(+1)`/`markInFlight(-1)` around the Gemini call).
+  New `DiffService.prioritizeFiles` (sort by `additions+deletions` desc) + `MAX_CHUNKS_PER_REVIEW`
+  (200, hardcoded in `review-coordinator.job.ts`) truncation — `Review.truncated` set at fan-out
+  time, carried through `ReviewFinalizeJobData` (no extra DB read) to append a summary note.
+  `SanitizedReviewSummary` (and the shared `packages/types` `ReviewSummary`) gained
+  `totalChunks`/`completedChunks`/`truncated` so `GET /reviews` and `GET /reviews/:reviewId`
+  expose them — no dashboard UI consumes them yet (the ADR itself leaves poll-vs-SSE/WebSocket
+  undecided).
+  Verified: `pnpm --filter @codeiq/db build`, `pnpm --filter @codeiq/types build`,
+  `pnpm --filter @codeiq/api {typecheck,lint,build,test}` (342/342, 12 new tests) and
+  `pnpm --filter @codeiq/web {typecheck,test}` (96/96, confirms the shared-type change doesn't
+  break the frontend) all pass clean. Not live-verified against a real GitHub PR (same open item
+  as Phase 3 — needs Docker/ngrok, see `state/current.md`) and no load test yet with a real
+  200+-chunk PR to confirm the truncation/fairness behavior end-to-end.
 - `knowledge/domains/review.md` gets updated to match actual behavior after each phase ships —
   not before.
