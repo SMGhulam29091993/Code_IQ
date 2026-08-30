@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Installation } from "@codeiq/db";
-import { reviewQueue } from "../jobs/queue";
+import { reviewCoordinatorQueue } from "../jobs/queue";
 import type {
   IInstallationRepository,
   IRepoLookupRepository,
@@ -9,7 +9,7 @@ import type {
 import { WebhookService } from "../modules/github/webhook.service";
 
 vi.mock("../jobs/queue", () => ({
-  reviewQueue: { add: vi.fn() },
+  reviewCoordinatorQueue: { add: vi.fn() },
 }));
 
 const NOW = new Date("2026-01-01T00:00:00Z");
@@ -104,7 +104,7 @@ describe("WebhookService", () => {
       });
 
       expect(message).toBe("OK");
-      expect(reviewQueue.add).toHaveBeenCalledWith(
+      expect(reviewCoordinatorQueue.add).toHaveBeenCalledWith(
         "review-pr",
         expect.objectContaining({
           installationId: "install-1",
@@ -132,7 +132,7 @@ describe("WebhookService", () => {
         });
       }
 
-      expect(reviewQueue.add).toHaveBeenCalledTimes(2);
+      expect(reviewCoordinatorQueue.add).toHaveBeenCalledTimes(2);
     });
 
     it("uses X-GitHub-Delivery as the BullMQ job idempotency key", async () => {
@@ -146,7 +146,7 @@ describe("WebhookService", () => {
         body: buildPullRequestBody(),
       });
 
-      expect(reviewQueue.add).toHaveBeenCalledWith(
+      expect(reviewCoordinatorQueue.add).toHaveBeenCalledWith(
         expect.anything(),
         expect.anything(),
         { jobId: "delivery-xyz" }
@@ -161,7 +161,7 @@ describe("WebhookService", () => {
       });
 
       expect(message).toBe("Action ignored");
-      expect(reviewQueue.add).not.toHaveBeenCalled();
+      expect(reviewCoordinatorQueue.add).not.toHaveBeenCalled();
     });
 
     it("does not enqueue when the installation is inactive", async () => {
@@ -176,7 +176,7 @@ describe("WebhookService", () => {
       });
 
       expect(message).toBe("Installation not active");
-      expect(reviewQueue.add).not.toHaveBeenCalled();
+      expect(reviewCoordinatorQueue.add).not.toHaveBeenCalled();
     });
 
     it("does not enqueue when the repo is inactive", async () => {
@@ -190,7 +190,7 @@ describe("WebhookService", () => {
       });
 
       expect(message).toBe("Repo not active");
-      expect(reviewQueue.add).not.toHaveBeenCalled();
+      expect(reviewCoordinatorQueue.add).not.toHaveBeenCalled();
     });
 
     it("does not enqueue when the repo is unknown (never synced)", async () => {
@@ -219,7 +219,7 @@ describe("WebhookService", () => {
       });
 
       expect(message).toBe("Draft PR skipped");
-      expect(reviewQueue.add).not.toHaveBeenCalled();
+      expect(reviewCoordinatorQueue.add).not.toHaveBeenCalled();
     });
 
     it("reviews draft PRs when reviewOnDraft is true", async () => {
@@ -236,7 +236,7 @@ describe("WebhookService", () => {
       });
 
       expect(message).toBe("OK");
-      expect(reviewQueue.add).toHaveBeenCalled();
+      expect(reviewCoordinatorQueue.add).toHaveBeenCalled();
     });
 
     it("treats a missing RepoConfig row as reviewOnDraft=false", async () => {
@@ -266,7 +266,7 @@ describe("WebhookService", () => {
       });
 
       expect(message).toBe("Plan limit reached");
-      expect(reviewQueue.add).not.toHaveBeenCalled();
+      expect(reviewCoordinatorQueue.add).not.toHaveBeenCalled();
     });
 
     it("never checks plan limits for non-FREE tiers", async () => {
@@ -282,14 +282,14 @@ describe("WebhookService", () => {
       });
 
       expect(repoRepo.countReviewsThisMonth).not.toHaveBeenCalled();
-      expect(reviewQueue.add).toHaveBeenCalled();
+      expect(reviewCoordinatorQueue.add).toHaveBeenCalled();
     });
 
     it("throws a 503 AppError when the queue is unreachable", async () => {
       vi.mocked(installationRepo.findByGithubId).mockResolvedValue(buildInstallation());
       vi.mocked(repoRepo.findByGithubId).mockResolvedValue(buildRepo());
       vi.mocked(repoRepo.countReviewsThisMonth).mockResolvedValue(0);
-      vi.mocked(reviewQueue.add).mockRejectedValue(new Error("ECONNREFUSED"));
+      vi.mocked(reviewCoordinatorQueue.add).mockRejectedValue(new Error("ECONNREFUSED"));
 
       await expect(
         service.handle({ event: "pull_request", deliveryId: "d", body: buildPullRequestBody() })

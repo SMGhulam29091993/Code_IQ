@@ -18,9 +18,13 @@ COPY --from=pruner /app/out/json/ .
 COPY --from=pruner /app/pnpm-lock.yaml ./pnpm-lock.yaml
 RUN pnpm install --frozen-lockfile
 COPY --from=pruner /app/out/full/ .
-# Next reads NEXT_PUBLIC_* vars at build time — pass through as a build arg.
+# Next reads NEXT_PUBLIC_* vars at build time — pass through as build args. Missing either one
+# silently bakes `undefined` into the client bundle (e.g. a broken
+# "https://github.com/apps/undefined/installations/new" install link) rather than erroring.
 ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_GITHUB_APP_SLUG
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_GITHUB_APP_SLUG=$NEXT_PUBLIC_GITHUB_APP_SLUG
 RUN pnpm turbo run build --filter=@codeiq/web
 
 # ---- Runtime: Next.js standalone output, non-root user ----

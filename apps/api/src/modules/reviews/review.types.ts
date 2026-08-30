@@ -4,6 +4,7 @@ import type { SanitizedRepoConfig } from "../repos/repo.types";
 export type ReviewStatus = "PENDING" | "RUNNING" | "DONE" | "FAILED";
 export type IssueSeverity = "critical" | "warning" | "info";
 export type IssueCategory = "bug" | "security" | "style" | "performance" | "logic";
+export type ChunkStatus = "PENDING" | "RUNNING" | "DONE" | "FAILED";
 
 export interface SanitizedReviewIssue {
   id: string;
@@ -24,6 +25,12 @@ export interface SanitizedReviewSummary {
   status: ReviewStatus;
   filesReviewed: number;
   createdAt: Date;
+  // Live progress (decisions/007 Phase 4) — completedChunks is UI-only and may not always be
+  // monotonic under chunk-job retries; poll while status is RUNNING for a coarse progress bar,
+  // never for correctness decisions.
+  totalChunks: number;
+  completedChunks: number;
+  truncated: boolean;
 }
 
 export interface SanitizedReview extends SanitizedReviewSummary {
@@ -92,6 +99,8 @@ export interface UpdateReviewInput {
   summary?: string;
   filesReviewed?: number;
   githubReviewId?: number;
+  totalChunks?: number;
+  truncated?: boolean;
 }
 
 export interface CreateIssueInput {
@@ -101,6 +110,23 @@ export interface CreateIssueInput {
   category: IssueCategory;
   message: string;
   suggestion: string;
+  chunkId?: string;
+}
+
+export interface CreateChunkInput {
+  filename: string;
+  patch: string;
+  chunkIndex: number;
+}
+
+export interface ReviewChunkRow {
+  id: string;
+  reviewId: string;
+  filename: string;
+  patch: string;
+  chunkIndex: number;
+  status: ChunkStatus;
+  attempts: number;
 }
 
 export interface IReviewRepository {
@@ -129,10 +155,36 @@ export interface IReviewRepository {
     userId: string,
     filters: { repoId?: string; since: Date }
   ): Promise<Array<{ date: string; count: number }>>;
+  // Consumed by BillingService.getSeats (.ai/knowledge/domains/billing.md "GET /billing/seats")
+  // — review count per prAuthor login, scoped to one installation (not one user's repos across
+  // installations, unlike every other method here — seats are an installation-level concept).
+  countReviewsByAuthorForInstallation(
+    installationId: string,
+    since: Date
+  ): Promise<Record<string, number>>;
+  // Atomic at the DB level — safe to call from multiple chunks completing concurrently within
+  // the same job (mapWithConcurrency). UI-progress only; the finalize step (review.job.ts) never
+  // trusts this counter for its DONE/FAILED gating decision — it re-queries ReviewChunk rows
+  // directly. See knowledge/technical/backend/review-pipeline-scaling.md.
+  incrementCompletedChunks(reviewId: string): Promise<void>;
 }
 
 export interface IReviewIssueRepository {
   createMany(reviewId: string, issues: CreateIssueInput[]): Promise<void>;
+  // All issues persisted for a review so far, regardless of which job run created them —
+  // used at finalize time (fresh run and resumed retries alike) instead of accumulating issues
+  // in memory across a retry's in-process chunk loop.
+  findByReviewId(reviewId: string): Promise<Array<GeminiIssue & { file: string }>>;
+}
+
+export interface IReviewChunkRepository {
+  createMany(reviewId: string, chunks: CreateChunkInput[]): Promise<ReviewChunkRow[]>;
+  findByReviewId(reviewId: string): Promise<ReviewChunkRow[]>;
+  // PENDING or FAILED rows — what a retry needs to re-run. DONE rows are never re-run/re-billed.
+  findIncomplete(reviewId: string): Promise<ReviewChunkRow[]>;
+  markRunning(chunkId: string): Promise<void>;
+  markDone(chunkId: string): Promise<void>;
+  markFailed(chunkId: string, error: string): Promise<void>;
 }
 
 export interface IReviewService {
@@ -160,6 +212,8 @@ export interface DiffFile {
   filename: string;
   patch?: string;
   status: string;
+  additions?: number;
+  deletions?: number;
 }
 
 export interface DiffChunk {
@@ -171,6 +225,21 @@ export interface DiffChunk {
 export interface IDiffService {
   filterFiles(files: DiffFile[], config: SanitizedRepoConfig): DiffFile[];
   chunkFiles(files: DiffFile[]): DiffChunk[];
+  // Sorts by additions+deletions descending — decisions/007 Phase 4's MAX_CHUNKS_PER_REVIEW
+  // truncation reviews the largest diffs first, since they're more likely to carry real issues
+  // than a one-line version bump.
+  prioritizeFiles(files: DiffFile[]): DiffFile[];
+}
+
+// Fleet-wide fair queuing (decisions/007 Phase 4) — a substitute for BullMQ Pro's paid
+// per-group rate limiting. Tracks each installation's currently-in-flight chunk count in Redis;
+// installations with many chunks already running get a lower BullMQ `priority` (numerically
+// higher = lower priority) for their next chunk jobs, so one tenant's huge PR can't starve
+// everyone else's small ones. See knowledge/technical/backend/review-pipeline-scaling.md "Why
+// fairness via priority score, not BullMQ Pro groups".
+export interface IFairnessService {
+  priorityFor(installationId: string): Promise<number>;
+  markInFlight(installationId: string, delta: number): Promise<void>;
 }
 
 export interface IGeminiService {
@@ -201,9 +270,11 @@ export interface ICommentService {
   postReview(octokit: import("@octokit/rest").Octokit, input: PostReviewInput): Promise<number>;
 }
 
-// BullMQ job payload — enqueued by modules/github/webhook.service.ts, consumed by
-// jobs/review.job.ts.
-export interface ReviewJobData {
+// BullMQ job payload for the coordinator job (review-coordinator-queue) — enqueued only by
+// modules/github/webhook.service.ts, for a fresh PR review. Fetches the diff, persists
+// ReviewChunk rows, and fans them out via reviewFlowProducer (decisions/007 Phase 3). Retries
+// never go through this queue — see ReviewChunkJobData/ReviewFinalizeJobData below.
+export interface ReviewCoordinatorJobData {
   installationId: string;
   repoId: string;
   prNumber: number;
@@ -211,4 +282,34 @@ export interface ReviewJobData {
   prAuthor: string;
   headSha: string;
   repoFullName: string;
+}
+
+// BullMQ job payload for one chunk (review-chunk-queue) — a child job under a finalize-review
+// Flow, added either by the coordinator (fresh review) or ReviewService.retryReview (resumed
+// review). repoConfig is resolved once by whichever of those two created the Flow and threaded
+// through here rather than re-fetched per chunk — see resolve-review-context.ts.
+export interface ReviewChunkJobData {
+  reviewId: string;
+  chunkId: string;
+  installationId: string;
+  filename: string;
+  patch: string;
+  repoConfig: SanitizedRepoConfig;
+}
+
+// BullMQ job payload for the finalize job (review-finalize-queue) — the Flow parent. BullMQ
+// activates it automatically once every review-chunk child has settled; failParentOnFailure:
+// false on each child means one chunk failing (after its own retries) doesn't block this.
+export interface ReviewFinalizeJobData {
+  reviewId: string;
+  installationId: string;
+  owner: string;
+  repo: string;
+  prNumber: number;
+  prTitle: string;
+  headSha: string;
+  // Known at Flow-creation time (coordinator: just computed; retry: already on the Review row)
+  // — carried through rather than re-queried so the finalize job can note it in the summary
+  // without an extra DB round trip.
+  truncated: boolean;
 }

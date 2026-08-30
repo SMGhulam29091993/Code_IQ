@@ -17,6 +17,10 @@ export class DiffService implements IDiffService {
     );
   }
 
+  prioritizeFiles(files: DiffFile[]): DiffFile[] {
+    return [...files].sort((a, b) => diffSize(b) - diffSize(a));
+  }
+
   chunkFiles(files: DiffFile[]): DiffChunk[] {
     const chunks: DiffChunk[] = [];
     for (const file of files) {
@@ -41,6 +45,10 @@ export class DiffService implements IDiffService {
     }
     return chunks;
   }
+}
+
+function diffSize(file: DiffFile): number {
+  return (file.additions ?? 0) + (file.deletions ?? 0);
 }
 
 // Slash-less patterns (e.g. "*.test.ts") match the basename at any depth, like .gitignore.

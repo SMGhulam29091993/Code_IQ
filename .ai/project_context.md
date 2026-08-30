@@ -2,7 +2,7 @@
 > AI-POS Index · ~150 lines · Links out; does not duplicate detail
 
 ## What this project is
-CodeIQ is a GitHub App that automatically reviews every pull request using Gemini 1.5 Pro.
+CodeIQ is a GitHub App that automatically reviews every pull request using Gemini 2.5 Flash.
 It posts inline comments per file, a PR-level summary, and stores all reviews in a dashboard.
 Billing is Stripe seat-based. Multi-tenant by GitHub App installation.
 
@@ -50,8 +50,10 @@ Turborepo monorepo
 | Screens       | File                                      |
 |---------------|-------------------------------------------|
 | Auth screens  | `knowledge/screens/auth-screens.md`       |
+| Onboarding    | `knowledge/screens/onboarding-screens.md` |
 | Dashboard + Repos + Reviews | `knowledge/screens/dashboard-screens.md` |
-| Billing + Workspace | `knowledge/screens/billing-screens.md` |
+| Billing       | `knowledge/screens/billing-screens.md` |
+| Account + Workspace | `knowledge/screens/account-screens.md` |
 
 ## Technical knowledge
 | Platform  | File                                                        |
@@ -62,6 +64,7 @@ Turborepo monorepo
 | Frontend  | `knowledge/technical/frontend/state-conventions.md`         |
 | Frontend  | `knowledge/technical/frontend/component-conventions.md`     |
 | Frontend  | `knowledge/technical/frontend/hooks-and-utils.md`           |
+| Backend   | `knowledge/technical/backend/review-pipeline-scaling.md` — HLD/LLD for chunk-level fan-out (decision 007) |
 
 ## Workflows
 | Workflow                     | File                                           |
@@ -90,6 +93,7 @@ Turborepo monorepo
 - `decisions/004-nodemailer-factory-pattern-for-mail-service.md`
 - `decisions/005-pgvector-over-pinecone.md` *(future)*
 - `decisions/006-redis-for-refresh-tokens.md`
+- `decisions/007-chunk-level-fanout-review-pipeline.md`
 
 ## Memory
 - `memory/lessons.md`

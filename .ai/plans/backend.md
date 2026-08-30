@@ -179,3 +179,78 @@
 - `apps/web` has no `public/` directory yet — the Dockerfile doesn't copy one; add that `COPY` back
   if/when one is added.
 - AWS provisioning is out of scope for local tooling — real infra, needs separate access/authorization.
+
+## Step 8 — Scalable review pipeline (chunk-level fan-out) [ in-progress ]
+
+> Design: `decisions/007-chunk-level-fanout-review-pipeline.md` +
+> `knowledge/technical/backend/review-pipeline-scaling.md` (full HLD/LLD). Raised because the
+> current single-BullMQ-job-per-PR pipeline head-of-line-blocks other tenants behind a large PR,
+> can't scale one PR's chunk parallelism past a single process, and re-does all Gemini calls on
+> retry. Ships in 4 phases, each independently verifiable, per the design doc.
+
+- [x] Phase 1 — `ReviewChunk` model + `Review.totalChunks/completedChunks/truncated` +
+  `ReviewIssue.chunkId`, migration only, no behavior change. Migration
+  `20260830063948_add_review_chunk_phase1`, applied to the live compose Postgres. Purely
+  additive (new nullable/defaulted columns + new table) — nothing reads/writes `ReviewChunk`
+  yet, `ReviewJobProcessor` unchanged. Two existing test fixtures (`review.job.test.ts`,
+  `review.service.test.ts`) updated to include the new `Review` fields Prisma's generated type
+  now requires. Also removed a stray empty `prisma/migrations/20260823095713_init 2` directory
+  (untracked, not part of git history — a leftover duplicate that was blocking `prisma migrate
+  dev` with a P3015 error unrelated to this change).
+  Verified: `pnpm --filter @codeiq/db build`, `pnpm --filter @codeiq/api typecheck`, `lint`, and
+  `test` (322/322) all pass clean; migration applied live via `prisma migrate dev`.
+- [x] Phase 2 — `ReviewJobProcessor` persists `ReviewChunk` rows around each chunk's Gemini call
+  (still single-job execution); `retryReview` only re-runs non-`DONE` chunks. New
+  `ReviewChunkRepository` (`createMany`/`findByReviewId`/`findIncomplete`/`markRunning`/
+  `markDone`/`markFailed`), `IReviewRepository.incrementCompletedChunks` (atomic DB increment),
+  `IReviewIssueRepository.findByReviewId`. `ReviewJobData` gained an optional `reviewId` —
+  `ReviewService.retryReview` now passes the existing review's id so the job resumes it (no new
+  Review row, no diff re-fetch) instead of starting over; the finalize step always re-queries
+  real `ReviewChunk` rows for its DONE/FAILED gate, never the denormalized `completedChunks`
+  counter. `knowledge/domains/review.md`'s pipeline pseudocode/edge-case table/test list updated
+  to match.
+  Verified: `pnpm --filter @codeiq/db build`, `pnpm --filter @codeiq/api typecheck`, `lint`,
+  `build`, and `test` (326/326, 4 new retry-resume cases) all pass clean. Not yet
+  live-verified against a real GitHub PR retry (needs Docker/ngrok — see `state/current.md`).
+- [x] Phase 3 — Split into `review-chunk-queue` + `review-finalize-queue` via BullMQ
+  `FlowProducer`; fleet-wide Gemini rate limit via `Worker.limiter`. The single
+  `ReviewJobProcessor`/`jobs/review.job.ts` from Phase 1/2 is gone, replaced by 3 processors:
+  `ReviewCoordinatorJobProcessor` (`jobs/review-coordinator.job.ts`, `review-coordinator-queue` —
+  same queue `webhook.service.ts` enqueues into, renamed from `review-queue`), `ReviewChunkJobProcessor`
+  (`jobs/review-chunk.job.ts`, `review-chunk-queue`, `Worker.limiter: { max: 5, duration: 60_000 }`
+  — still the free tier's 5 RPM), and `ReviewFinalizeJobProcessor` (`jobs/review-finalize.job.ts`,
+  `review-finalize-queue`, the Flow parent). New `reviewFlowProducer` singleton (`jobs/queue.ts`)
+  and `modules/reviews/resolve-review-context.ts` (installation octokit + effective repoConfig,
+  resolved once and shared by the coordinator and `ReviewService.retryReview` — never re-fetched
+  per chunk). `retryReview` now calls `reviewFlowProducer.add` directly with the review's
+  incomplete chunks as Flow children instead of enqueueing into the coordinator queue.
+  `knowledge/domains/review.md`'s "Core pipeline" section rewritten for the 3-processor
+  architecture (this doc's own Phase 3 section here now points there for current behavior).
+  Verified: `pnpm --filter @codeiq/api typecheck`, `lint`, `build`, and `test` (328/328 — 3 new
+  processor test files replacing the old single-job one) all pass clean. **Not yet load-tested
+  against a real large PR** — that and confirming `failParentOnFailure: false` under real
+  partial-chunk-failure conditions are still open before trusting this at scale in production
+  (see `knowledge/technical/backend/review-pipeline-scaling.md` Phase 3 note).
+- [x] Phase 4 — Per-installation fairness (`fairnessService`, priority scoring),
+  `MAX_CHUNKS_PER_REVIEW` truncation + prioritization, and the backend half of live progress
+  (API fields; dashboard UI wiring is a separate, not-yet-scheduled frontend step — see note
+  below). New `FairnessService` (`lib/fairness.ts`) — Redis `chunks:inflight:${installationId}`
+  counter (`INCR`/`DECR`, 300s TTL safety net), `priorityFor` returns a BullMQ `priority` 1–10
+  (one tier lower per 20 in-flight chunks). Wired into `ReviewCoordinatorJobProcessor` and
+  `ReviewService.retryReview` (score priority before fanning out) and
+  `ReviewChunkJobProcessor` (`markInFlight(+1)`/`markInFlight(-1)` around the Gemini call).
+  New `DiffService.prioritizeFiles` (sort by `additions+deletions` desc) + `MAX_CHUNKS_PER_REVIEW`
+  (200, hardcoded in `review-coordinator.job.ts`) truncation — `Review.truncated` set at fan-out
+  time, carried through `ReviewFinalizeJobData` (no extra DB read) to append a summary note.
+  `SanitizedReviewSummary` (and the shared `packages/types` `ReviewSummary`) gained
+  `totalChunks`/`completedChunks`/`truncated` so `GET /reviews` and `GET /reviews/:reviewId`
+  expose them — no dashboard UI consumes them yet (the ADR itself leaves poll-vs-SSE/WebSocket
+  undecided).
+  Verified: `pnpm --filter @codeiq/db build`, `pnpm --filter @codeiq/types build`,
+  `pnpm --filter @codeiq/api {typecheck,lint,build,test}` (342/342, 12 new tests) and
+  `pnpm --filter @codeiq/web {typecheck,test}` (96/96, confirms the shared-type change doesn't
+  break the frontend) all pass clean. Not live-verified against a real GitHub PR (same open item
+  as Phase 3 — needs Docker/ngrok, see `state/current.md`) and no load test yet with a real
+  200+-chunk PR to confirm the truncation/fairness behavior end-to-end.
+- `knowledge/domains/review.md` gets updated to match actual behavior after each phase ships —
+  not before.

@@ -11,6 +11,7 @@ import type { AuthTokensResult, RegisterResult } from "@codeiq/types";
 import { Button } from "@/components/ui/Button";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Input } from "@/components/ui/Input";
+import { Logo } from "@/components/ui/Logo";
 import { useAuth } from "@/hooks/useAuth";
 import { api } from "@/lib/api";
 import { passwordStrength } from "@/lib/password-strength";
@@ -105,7 +106,8 @@ export const RegisterForm: FC = () => {
   if (step === "verify-otp") {
     return (
       <div className="w-full max-w-sm rounded-card border border-border bg-surface p-8">
-        <h1 className="mb-2 text-xl font-semibold text-text">Check your email</h1>
+        <Logo className="mb-8" />
+        <h1 className="mb-2 font-display text-xl font-semibold text-text">Check your email</h1>
         <p className="mb-6 text-sm text-text2">
           Enter the 6-digit code we sent to verify your account.
         </p>
@@ -159,7 +161,8 @@ export const RegisterForm: FC = () => {
 
   return (
     <div className="w-full max-w-sm rounded-card border border-border bg-surface p-8">
-      <h1 className="mb-6 text-xl font-semibold text-text">Create account</h1>
+      <Logo className="mb-8" />
+      <h1 className="mb-6 font-display text-xl font-semibold text-text">Create account</h1>
       <form
         onSubmit={registerForm.handleSubmit((data) => {
           setApiError(null);

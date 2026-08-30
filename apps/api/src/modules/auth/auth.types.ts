@@ -50,6 +50,24 @@ export interface LogoutInput {
   refreshToken: string;
 }
 
+// New 2026-08-23 — .ai/knowledge/domains/auth.md "GET/PATCH /auth/me", "POST /auth/change-password".
+export interface GetMeResult {
+  user: SanitizedUser;
+}
+
+export interface UpdateProfileInput {
+  name: string;
+}
+
+export interface UpdateProfileResult {
+  user: SanitizedUser;
+}
+
+export interface ChangePasswordInput {
+  currentPassword: string;
+  newPassword: string;
+}
+
 export interface IUserRepository {
   findByEmail(email: string): Promise<User | null>;
   findById(id: string): Promise<User | null>;
@@ -63,6 +81,10 @@ export interface IUserRepository {
     userId: string,
     data: { githubId: string; githubLogin: string; githubAccessToken: string }
   ): Promise<User>;
+  // Generic profile update — name (PATCH /auth/me) and passwordHash (change-password) are the
+  // only two fields ever passed here; email is deliberately not updatable this way, see
+  // PATCH /auth/me's doc note.
+  update(id: string, data: Partial<{ name: string; passwordHash: string }>): Promise<User>;
 }
 
 export interface IRefreshTokenRepository {
@@ -71,6 +93,11 @@ export interface IRefreshTokenRepository {
   // logout()'s ownership check needs.
   findByToken(token: string): Promise<{ userId: string } | null>;
   deleteByToken(token: string): Promise<void>;
+  // Revokes every refresh token belonging to this user — used by changePassword() to log out
+  // all other sessions/devices. No reverse index by userId exists (findByToken is a
+  // key-goes-in-token-lookup design), so this SCANs refresh_token:* rather than doing a direct
+  // key lookup — see refresh-token.repository.ts's implementation note.
+  deleteAllForUser(userId: string): Promise<void>;
 }
 
 export interface IOtpRepository {
@@ -89,4 +116,7 @@ export interface IAuthService {
   login(input: LoginInput): Promise<AuthTokensResult>;
   refresh(input: RefreshInput): Promise<RefreshResult>;
   logout(userId: string, input: LogoutInput): Promise<void>;
+  getMe(userId: string): Promise<GetMeResult>;
+  updateProfile(userId: string, input: UpdateProfileInput): Promise<UpdateProfileResult>;
+  changePassword(userId: string, input: ChangePasswordInput): Promise<void>;
 }

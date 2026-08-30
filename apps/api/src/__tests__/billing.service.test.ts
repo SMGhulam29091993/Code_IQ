@@ -5,9 +5,11 @@ import type { IUserRepository } from "../modules/auth/auth.types";
 import { BillingService } from "../modules/billing/billing.service";
 import type {
   IBillingInstallationRepository,
+  IBillingReviewRepository,
   IProcessedEventRepository,
   IStripeClient,
 } from "../modules/billing/billing.types";
+import type { IGithubApiClient } from "../modules/github/github.types";
 import type { IRepoService } from "../modules/repos/repo.types";
 
 const NOW = new Date("2026-01-01T00:00:00Z");
@@ -53,6 +55,8 @@ describe("BillingService", () => {
   let processedEventRepo: IProcessedEventRepository;
   let repoService: IRepoService;
   let stripeClient: IStripeClient;
+  let githubApiClient: IGithubApiClient;
+  let reviewRepo: IBillingReviewRepository;
   let service: BillingService;
 
   beforeEach(() => {
@@ -70,10 +74,12 @@ describe("BillingService", () => {
       lockEmail: vi.fn(),
       findByGithubId: vi.fn(),
       linkGithubIdentity: vi.fn(),
+      update: vi.fn(),
     };
     processedEventRepo = { exists: vi.fn().mockResolvedValue(false), create: vi.fn() };
     repoService = {
       listRepos: vi.fn(),
+      getRepo: vi.fn(),
       activateRepo: vi.fn(),
       deactivateRepo: vi.fn(),
       getConfig: vi.fn(),
@@ -86,15 +92,27 @@ describe("BillingService", () => {
       checkout: { sessions: { create: vi.fn() } },
       billingPortal: { sessions: { create: vi.fn() } },
       subscriptions: { retrieve: vi.fn() },
+      invoices: { createPreview: vi.fn(), list: vi.fn() },
+      paymentMethods: { list: vi.fn() },
       webhooks: { constructEvent: vi.fn() },
     };
+    githubApiClient = {
+      getInstallation: vi.fn(),
+      exchangeOAuthCode: vi.fn(),
+      getAuthenticatedUser: vi.fn(),
+      listInstallationRepos: vi.fn(),
+      listOrgMembers: vi.fn(),
+    };
+    reviewRepo = { countReviewsByAuthorForInstallation: vi.fn().mockResolvedValue({}) };
 
     service = new BillingService(
       installationRepo,
       userRepo,
       processedEventRepo,
       repoService,
-      stripeClient
+      stripeClient,
+      githubApiClient,
+      reviewRepo
     );
   });
 
@@ -106,6 +124,154 @@ describe("BillingService", () => {
       expect(result.plans[0]!.stripePriceId).toBeNull();
       expect(result.plans[1]!.stripePriceId).not.toBeNull();
       expect(result.plans[2]!.stripePriceId).not.toBeNull();
+    });
+  });
+
+  describe("getSubscription", () => {
+    it("returns plan tier, seat count, next invoice and payment method for a subscribed installation", async () => {
+      vi.mocked(installationRepo.findByUserId).mockResolvedValue(
+        buildInstallation({
+          planTier: "TEAM",
+          seatCount: 8,
+          stripeSubId: "sub_1",
+          stripeCustomerId: "cus_1",
+        })
+      );
+      vi.mocked(stripeClient.invoices.createPreview).mockResolvedValue({
+        amount_due: 22800,
+        next_payment_attempt: 1735689600,
+      });
+      vi.mocked(stripeClient.paymentMethods.list).mockResolvedValue({
+        data: [{ card: { brand: "visa", last4: "4242" } }],
+      });
+
+      const result = await service.getSubscription("user-1");
+
+      expect(result.planTier).toBe("TEAM");
+      expect(result.seatCount).toBe(8);
+      expect(result.nextInvoice).toEqual({
+        date: new Date(1735689600 * 1000).toISOString(),
+        amount: 228,
+      });
+      expect(result.paymentMethod).toEqual({ brand: "visa", last4: "4242" });
+    });
+
+    it("throws BadRequestError when installation has no stripeSubId", async () => {
+      vi.mocked(installationRepo.findByUserId).mockResolvedValue(
+        buildInstallation({ planTier: "FREE", stripeSubId: null })
+      );
+
+      await expect(service.getSubscription("user-1")).rejects.toThrow(BadRequestError);
+    });
+
+    it("throws BadRequestError when user has no installation", async () => {
+      vi.mocked(installationRepo.findByUserId).mockResolvedValue(null);
+
+      await expect(service.getSubscription("user-1")).rejects.toThrow(BadRequestError);
+    });
+
+    it("returns nextInvoice: null when there is no upcoming invoice", async () => {
+      vi.mocked(installationRepo.findByUserId).mockResolvedValue(
+        buildInstallation({ planTier: "TEAM", stripeSubId: "sub_1", stripeCustomerId: "cus_1" })
+      );
+      vi.mocked(stripeClient.invoices.createPreview).mockRejectedValue(new Error("no upcoming invoice"));
+      vi.mocked(stripeClient.paymentMethods.list).mockResolvedValue({ data: [] });
+
+      const result = await service.getSubscription("user-1");
+
+      expect(result.nextInvoice).toBeNull();
+      expect(result.paymentMethod).toBeNull();
+    });
+  });
+
+  describe("getSeats", () => {
+    it("returns org members from the GitHub API with role and PR review count", async () => {
+      vi.mocked(installationRepo.findByUserId).mockResolvedValue(
+        buildInstallation({ accountType: "Organization", stripeSubId: "sub_1" })
+      );
+      vi.mocked(stripeClient.subscriptions.retrieve).mockResolvedValue({
+        id: "sub_1",
+        items: {
+          data: [{ price: { id: "price_1" }, quantity: 8, current_period_start: 1735689600 }],
+        },
+      });
+      vi.mocked(githubApiClient.listOrgMembers).mockResolvedValue([
+        { login: "dparker", role: "admin" },
+        { login: "sfarrow", role: "member" },
+      ]);
+      vi.mocked(reviewRepo.countReviewsByAuthorForInstallation).mockResolvedValue({
+        dparker: 34,
+      });
+
+      const result = await service.getSeats("user-1");
+
+      expect(result.seats).toEqual([
+        { login: "dparker", role: "admin", prsReviewed: 34 },
+        { login: "sfarrow", role: "member", prsReviewed: 0 },
+      ]);
+    });
+
+    it("throws BadRequestError for a non-organization installation", async () => {
+      vi.mocked(installationRepo.findByUserId).mockResolvedValue(
+        buildInstallation({ accountType: "User" })
+      );
+
+      await expect(service.getSeats("user-1")).rejects.toThrow(BadRequestError);
+    });
+
+    it("throws BadRequestError when user has no installation", async () => {
+      vi.mocked(installationRepo.findByUserId).mockResolvedValue(null);
+
+      await expect(service.getSeats("user-1")).rejects.toThrow(BadRequestError);
+    });
+  });
+
+  describe("getInvoices", () => {
+    it("returns invoices for the installation's Stripe customer", async () => {
+      vi.mocked(installationRepo.findByUserId).mockResolvedValue(
+        buildInstallation({ stripeCustomerId: "cus_1" })
+      );
+      vi.mocked(stripeClient.invoices.list).mockResolvedValue({
+        data: [
+          {
+            created: 1735689600,
+            amount_paid: 22800,
+            status: "paid",
+            hosted_invoice_url: "https://stripe.com/invoice/1",
+          },
+        ],
+      });
+
+      const result = await service.getInvoices("user-1", {});
+
+      expect(result.invoices).toEqual([
+        {
+          date: new Date(1735689600 * 1000).toISOString(),
+          amount: 228,
+          status: "paid",
+          pdfUrl: "https://stripe.com/invoice/1",
+        },
+      ]);
+      expect(stripeClient.invoices.list).toHaveBeenCalledWith({ customer: "cus_1", limit: 12 });
+    });
+
+    it("respects the limit param up to 50", async () => {
+      vi.mocked(installationRepo.findByUserId).mockResolvedValue(
+        buildInstallation({ stripeCustomerId: "cus_1" })
+      );
+      vi.mocked(stripeClient.invoices.list).mockResolvedValue({ data: [] });
+
+      await service.getInvoices("user-1", { limit: 200 });
+
+      expect(stripeClient.invoices.list).toHaveBeenCalledWith({ customer: "cus_1", limit: 50 });
+    });
+
+    it("throws BadRequestError when installation has no stripeCustomerId", async () => {
+      vi.mocked(installationRepo.findByUserId).mockResolvedValue(
+        buildInstallation({ stripeCustomerId: null })
+      );
+
+      await expect(service.getInvoices("user-1", {})).rejects.toThrow(BadRequestError);
     });
   });
 
@@ -291,7 +457,15 @@ describe("BillingService", () => {
       });
       vi.mocked(stripeClient.subscriptions.retrieve).mockResolvedValue({
         id: "sub_1",
-        items: { data: [{ price: { id: process.env.STRIPE_PRICE_ID_PRO! }, quantity: 5 }] },
+        items: {
+          data: [
+            {
+              price: { id: process.env.STRIPE_PRICE_ID_PRO! },
+              quantity: 5,
+              current_period_start: 1735689600,
+            },
+          ],
+        },
       });
 
       await service.handleStripeWebhook(Buffer.from("{}"), "sig");

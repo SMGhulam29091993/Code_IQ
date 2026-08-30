@@ -1,12 +1,36 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Review } from "@codeiq/db";
-import { reviewQueue } from "../jobs/queue";
+import type { Installation, Review } from "@codeiq/db";
+import { reviewFlowProducer } from "../jobs/queue";
 import { AppError, BadRequestError, ForbiddenError, NotFoundError } from "../lib/errors";
-import type { IRepoRepository, RepoWithConfigAndOwner } from "../modules/repos/repo.types";
+import type { IInstallationRepository } from "../modules/github/github.types";
+import type { ConfigService } from "../modules/repos/config.service";
+import type { IRepoRepository, RepoWithConfigAndOwner, SanitizedRepoConfig } from "../modules/repos/repo.types";
 import { ReviewService } from "../modules/reviews/review.service";
-import type { IReviewRepository, ReviewWithOwner } from "../modules/reviews/review.types";
+import type {
+  IFairnessService,
+  IReviewChunkRepository,
+  IReviewRepository,
+  ReviewChunkRow,
+  ReviewWithOwner,
+} from "../modules/reviews/review.types";
 
-vi.mock("../jobs/queue", () => ({ reviewQueue: { add: vi.fn() } }));
+vi.mock("../jobs/queue", () => ({
+  reviewCoordinatorQueue: { add: vi.fn() },
+  reviewFlowProducer: { add: vi.fn() },
+  REVIEW_CHUNK_QUEUE_NAME: "review-chunk-queue",
+  REVIEW_FINALIZE_QUEUE_NAME: "review-finalize-queue",
+}));
+vi.mock("../lib/octokit", () => ({
+  getInstallationOctokit: vi.fn().mockReturnValue({ rest: {} }),
+}));
+
+const DEFAULT_CONFIG: SanitizedRepoConfig = {
+  severityThreshold: "WARNING",
+  enabledCategories: ["bug", "security", "performance", "logic"],
+  ignorePatterns: [],
+  reviewOnDraft: false,
+  postSummaryComment: true,
+};
 
 const NOW = new Date("2026-01-01T00:00:00Z");
 
@@ -22,6 +46,9 @@ function buildReview(overrides: Partial<Review> = {}): Review {
     summary: null,
     filesReviewed: 0,
     githubReviewId: null,
+    totalChunks: 0,
+    completedChunks: 0,
+    truncated: false,
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,
@@ -53,9 +80,26 @@ function buildOwnedRepo(overrides: Partial<Record<string, unknown>> = {}): RepoW
   } as unknown as RepoWithConfigAndOwner;
 }
 
+function buildChunk(overrides: Partial<ReviewChunkRow> = {}): ReviewChunkRow {
+  return {
+    id: "chunk-1",
+    reviewId: "review-1",
+    filename: "a.ts",
+    patch: "@@ -1 +1 @@",
+    chunkIndex: 0,
+    status: "FAILED",
+    attempts: 1,
+    ...overrides,
+  };
+}
+
 describe("ReviewService", () => {
   let reviewRepo: IReviewRepository;
   let repoRepo: IRepoRepository;
+  let reviewChunkRepo: IReviewChunkRepository;
+  let installationRepo: IInstallationRepository;
+  let configService: ConfigService;
+  let fairnessService: IFairnessService;
   let service: ReviewService;
 
   beforeEach(() => {
@@ -70,6 +114,8 @@ describe("ReviewService", () => {
       countIssuesBySeverityForUser: vi.fn(),
       countIssuesByCategoryForUser: vi.fn(),
       countIssuesByDayForUser: vi.fn(),
+      countReviewsByAuthorForInstallation: vi.fn(),
+      incrementCompletedChunks: vi.fn(),
     };
     repoRepo = {
       findManyForUser: vi.fn(),
@@ -80,8 +126,35 @@ describe("ReviewService", () => {
       findActiveIdsForInstallationByRecency: vi.fn(),
       setActiveMany: vi.fn(),
     };
+    reviewChunkRepo = {
+      createMany: vi.fn(),
+      findByReviewId: vi.fn(),
+      findIncomplete: vi.fn().mockResolvedValue([buildChunk()]),
+      markRunning: vi.fn(),
+      markDone: vi.fn(),
+      markFailed: vi.fn(),
+    };
+    installationRepo = {
+      findByGithubId: vi.fn(),
+      findById: vi.fn().mockResolvedValue({ githubInstallationId: 555 } as Installation),
+      upsert: vi.fn(),
+      findManyActiveForUser: vi.fn(),
+      softDelete: vi.fn(),
+      updateActiveByGithubId: vi.fn(),
+    };
+    configService = {
+      getEffectiveConfig: vi.fn().mockResolvedValue(DEFAULT_CONFIG),
+    } as unknown as ConfigService;
+    fairnessService = { priorityFor: vi.fn().mockResolvedValue(1), markInFlight: vi.fn() };
 
-    service = new ReviewService(reviewRepo, repoRepo);
+    service = new ReviewService(
+      reviewRepo,
+      repoRepo,
+      reviewChunkRepo,
+      installationRepo,
+      configService,
+      fairnessService
+    );
   });
 
   describe("listReviews", () => {
@@ -220,20 +293,80 @@ describe("ReviewService", () => {
   });
 
   describe("retryReview", () => {
-    it("resets status to PENDING and enqueues job", async () => {
+    it("resets status to RUNNING and re-enters the Flow with only its incomplete chunks", async () => {
       vi.mocked(reviewRepo.findById).mockResolvedValue(buildOwnedReview({ status: "FAILED" }));
       vi.mocked(repoRepo.findByIdForUser).mockResolvedValue(buildOwnedRepo());
-      vi.mocked(reviewRepo.update).mockResolvedValue(buildReview({ status: "PENDING" }));
+      vi.mocked(reviewRepo.update).mockResolvedValue(buildReview({ status: "RUNNING" }));
+      vi.mocked(reviewChunkRepo.findIncomplete).mockResolvedValue([
+        buildChunk({ id: "chunk-1", filename: "a.ts", attempts: 1 }),
+      ]);
 
       const result = await service.retryReview("user-1", "review-1");
 
-      expect(reviewRepo.update).toHaveBeenCalledWith("review-1", { status: "PENDING" });
-      expect(reviewQueue.add).toHaveBeenCalledWith(
-        "review-pr",
-        expect.objectContaining({ installationId: "install-1", repoId: "repo-1" }),
-        { jobId: "retry-review-1" }
-      );
-      expect(result.review.status).toBe("PENDING");
+      expect(reviewChunkRepo.findIncomplete).toHaveBeenCalledWith("review-1");
+      expect(reviewRepo.update).toHaveBeenCalledWith("review-1", { status: "RUNNING" });
+      expect(reviewFlowProducer.add).toHaveBeenCalledWith({
+        name: "finalize-review",
+        queueName: "review-finalize-queue",
+        data: expect.objectContaining({
+          reviewId: "review-1",
+          installationId: "install-1",
+          owner: "acme",
+          repo: "widgets",
+        }),
+        children: [
+          expect.objectContaining({
+            name: "review-chunk",
+            queueName: "review-chunk-queue",
+            data: expect.objectContaining({
+              reviewId: "review-1",
+              chunkId: "chunk-1",
+              installationId: "install-1",
+              filename: "a.ts",
+            }),
+            opts: expect.objectContaining({
+              jobId: "review-1:chunk-1:retry1",
+              priority: 1,
+              failParentOnFailure: false,
+            }),
+          }),
+        ],
+      });
+      expect(result.review.status).toBe("RUNNING");
+    });
+
+    it("scores priority from the installation's current in-flight chunk count", async () => {
+      vi.mocked(reviewRepo.findById).mockResolvedValue(buildOwnedReview({ status: "FAILED" }));
+      vi.mocked(repoRepo.findByIdForUser).mockResolvedValue(buildOwnedRepo());
+      vi.mocked(reviewRepo.update).mockResolvedValue(buildReview({ status: "RUNNING" }));
+      vi.mocked(fairnessService.priorityFor).mockResolvedValue(7);
+
+      await service.retryReview("user-1", "review-1");
+
+      expect(fairnessService.priorityFor).toHaveBeenCalledWith("install-1");
+      const call = vi.mocked(reviewFlowProducer.add).mock.calls[0]![0] as {
+        children: Array<{ opts: { priority: number } }>;
+      };
+      expect(call.children[0]!.opts.priority).toBe(7);
+    });
+
+    it("never re-runs a chunk that already reached DONE", async () => {
+      vi.mocked(reviewRepo.findById).mockResolvedValue(buildOwnedReview({ status: "FAILED" }));
+      vi.mocked(repoRepo.findByIdForUser).mockResolvedValue(buildOwnedRepo());
+      vi.mocked(reviewRepo.update).mockResolvedValue(buildReview({ status: "RUNNING" }));
+      // findIncomplete itself only returns PENDING/FAILED rows — a DONE chunk is never in this
+      // list, so the Flow's children can only ever contain what's actually incomplete.
+      vi.mocked(reviewChunkRepo.findIncomplete).mockResolvedValue([
+        buildChunk({ id: "chunk-2", filename: "b.ts", status: "FAILED" }),
+      ]);
+
+      await service.retryReview("user-1", "review-1");
+
+      const call = vi.mocked(reviewFlowProducer.add).mock.calls[0]![0] as {
+        children: Array<{ data: { chunkId: string } }>;
+      };
+      expect(call.children).toHaveLength(1);
+      expect(call.children[0]!.data.chunkId).toBe("chunk-2");
     });
 
     it("throws BadRequestError when review status is not FAILED", async () => {
@@ -259,8 +392,8 @@ describe("ReviewService", () => {
     it("throws 503 AppError when BullMQ is unavailable", async () => {
       vi.mocked(reviewRepo.findById).mockResolvedValue(buildOwnedReview({ status: "FAILED" }));
       vi.mocked(repoRepo.findByIdForUser).mockResolvedValue(buildOwnedRepo());
-      vi.mocked(reviewRepo.update).mockResolvedValue(buildReview({ status: "PENDING" }));
-      vi.mocked(reviewQueue.add).mockRejectedValue(new Error("ECONNREFUSED"));
+      vi.mocked(reviewRepo.update).mockResolvedValue(buildReview({ status: "RUNNING" }));
+      vi.mocked(reviewFlowProducer.add).mockRejectedValue(new Error("ECONNREFUSED"));
 
       await expect(service.retryReview("user-1", "review-1")).rejects.toThrow(AppError);
     });

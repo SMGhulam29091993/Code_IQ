@@ -10,6 +10,7 @@ vi.mock("@codeiq/db", () => ({
     user: { findUnique: vi.fn() },
     installation: { findFirst: vi.fn(), update: vi.fn() },
     repo: { findMany: vi.fn(), updateMany: vi.fn() },
+    review: { groupBy: vi.fn() },
     processedStripeEvent: { findUnique: vi.fn(), create: vi.fn() },
   },
 }));
@@ -29,9 +30,18 @@ vi.mock("nodemailer", () => ({
   },
 }));
 
-vi.mock("@octokit/rest", () => ({ Octokit: vi.fn().mockImplementation(() => ({ rest: {} })) }));
+vi.mock("@octokit/rest", () => ({
+  Octokit: vi.fn().mockImplementation(() => ({
+    rest: { orgs: { listMembers: vi.fn().mockResolvedValue({ data: [] }) } },
+  })),
+}));
 vi.mock("@octokit/auth-app", () => ({ createAppAuth: vi.fn() }));
-vi.mock("../jobs/queue", () => ({ reviewQueue: { add: vi.fn() } }));
+vi.mock("../jobs/queue", () => ({
+  reviewCoordinatorQueue: { add: vi.fn() },
+  reviewFlowProducer: { add: vi.fn() },
+  REVIEW_CHUNK_QUEUE_NAME: "review-chunk-queue",
+  REVIEW_FINALIZE_QUEUE_NAME: "review-finalize-queue",
+}));
 
 // Mock our own thin wrapper (same stance as ../jobs/queue above) rather than the "stripe"
 // package itself — BillingService only ever depends on this module's exported instance.
@@ -41,6 +51,8 @@ vi.mock("../lib/stripe", () => ({
     checkout: { sessions: { create: vi.fn() } },
     billingPortal: { sessions: { create: vi.fn() } },
     subscriptions: { retrieve: vi.fn() },
+    invoices: { createPreview: vi.fn(), list: vi.fn() },
+    paymentMethods: { list: vi.fn() },
     webhooks: { constructEvent: vi.fn() },
   },
 }));
@@ -91,6 +103,7 @@ function mockPrisma() {
     user: { findUnique: ReturnType<typeof vi.fn> };
     installation: { findFirst: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
     repo: { findMany: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
+    review: { groupBy: ReturnType<typeof vi.fn> };
     processedStripeEvent: { findUnique: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn> };
   };
 }
@@ -101,6 +114,8 @@ function mockStripe() {
     checkout: { sessions: { create: ReturnType<typeof vi.fn> } };
     billingPortal: { sessions: { create: ReturnType<typeof vi.fn> } };
     subscriptions: { retrieve: ReturnType<typeof vi.fn> };
+    invoices: { createPreview: ReturnType<typeof vi.fn>; list: ReturnType<typeof vi.fn> };
+    paymentMethods: { list: ReturnType<typeof vi.fn> };
     webhooks: { constructEvent: ReturnType<typeof vi.fn> };
   };
 }
@@ -206,6 +221,137 @@ describe("Billing routes", () => {
 
       expect(res.status).toBe(400);
       expect(res.body.message).toBe("No active subscription found");
+    });
+  });
+
+  describe("GET /api/billing/subscription", () => {
+    it("returns 401 without a token", async () => {
+      const res = await request(app).get("/api/billing/subscription");
+      expect(res.status).toBe(401);
+    });
+
+    it("returns 400 when installation has no active subscription", async () => {
+      mockPrisma().user.findUnique.mockResolvedValueOnce(buildUser());
+      mockPrisma().installation.findFirst.mockResolvedValueOnce(buildInstallation());
+
+      const res = await request(app)
+        .get("/api/billing/subscription")
+        .set("Authorization", `Bearer ${accessTokenFor("user-1")}`);
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe("No active subscription found");
+    });
+
+    it("returns 200 with plan/seat/invoice/payment info for a subscribed installation", async () => {
+      mockPrisma().user.findUnique.mockResolvedValueOnce(buildUser());
+      mockPrisma().installation.findFirst.mockResolvedValueOnce(
+        buildInstallation({
+          planTier: "TEAM",
+          seatCount: 8,
+          stripeSubId: "sub_1",
+          stripeCustomerId: "cus_1",
+        })
+      );
+      mockStripe().invoices.createPreview.mockResolvedValueOnce({
+        amount_due: 22800,
+        next_payment_attempt: 1735689600,
+      });
+      mockStripe().paymentMethods.list.mockResolvedValueOnce({
+        data: [{ card: { brand: "visa", last4: "4242" } }],
+      });
+
+      const res = await request(app)
+        .get("/api/billing/subscription")
+        .set("Authorization", `Bearer ${accessTokenFor("user-1")}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.planTier).toBe("TEAM");
+      expect(res.body.data.seatCount).toBe(8);
+      expect(res.body.data.paymentMethod).toEqual({ brand: "visa", last4: "4242" });
+    });
+  });
+
+  describe("GET /api/billing/seats", () => {
+    it("returns 401 without a token", async () => {
+      const res = await request(app).get("/api/billing/seats");
+      expect(res.status).toBe(401);
+    });
+
+    it("returns 400 for a non-organization installation", async () => {
+      mockPrisma().user.findUnique.mockResolvedValueOnce(buildUser());
+      mockPrisma().installation.findFirst.mockResolvedValueOnce(
+        buildInstallation({ accountType: "User" })
+      );
+
+      const res = await request(app)
+        .get("/api/billing/seats")
+        .set("Authorization", `Bearer ${accessTokenFor("user-1")}`);
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe("Seats are only available for organization installations");
+    });
+
+    it("returns 200 with an empty seat list when the org has no members", async () => {
+      mockPrisma().user.findUnique.mockResolvedValueOnce(buildUser());
+      mockPrisma().installation.findFirst.mockResolvedValueOnce(buildInstallation());
+      mockPrisma().review.groupBy.mockResolvedValueOnce([]);
+
+      const res = await request(app)
+        .get("/api/billing/seats")
+        .set("Authorization", `Bearer ${accessTokenFor("user-1")}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.seats).toEqual([]);
+    });
+  });
+
+  describe("GET /api/billing/invoices", () => {
+    it("returns 401 without a token", async () => {
+      const res = await request(app).get("/api/billing/invoices");
+      expect(res.status).toBe(401);
+    });
+
+    it("returns 400 when installation has no Stripe customer", async () => {
+      mockPrisma().user.findUnique.mockResolvedValueOnce(buildUser());
+      mockPrisma().installation.findFirst.mockResolvedValueOnce(buildInstallation());
+
+      const res = await request(app)
+        .get("/api/billing/invoices")
+        .set("Authorization", `Bearer ${accessTokenFor("user-1")}`);
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe("No billing history found");
+    });
+
+    it("returns 200 with invoices for a subscribed installation", async () => {
+      mockPrisma().user.findUnique.mockResolvedValueOnce(buildUser());
+      mockPrisma().installation.findFirst.mockResolvedValueOnce(
+        buildInstallation({ stripeCustomerId: "cus_1" })
+      );
+      mockStripe().invoices.list.mockResolvedValueOnce({
+        data: [
+          {
+            created: 1735689600,
+            amount_paid: 22800,
+            status: "paid",
+            hosted_invoice_url: "https://stripe.com/invoice/1",
+          },
+        ],
+      });
+
+      const res = await request(app)
+        .get("/api/billing/invoices")
+        .set("Authorization", `Bearer ${accessTokenFor("user-1")}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.invoices).toEqual([
+        {
+          date: new Date(1735689600 * 1000).toISOString(),
+          amount: 228,
+          status: "paid",
+          pdfUrl: "https://stripe.com/invoice/1",
+        },
+      ]);
     });
   });
 

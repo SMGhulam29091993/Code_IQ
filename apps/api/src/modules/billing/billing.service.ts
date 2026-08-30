@@ -2,20 +2,29 @@ import type { PlanTier } from "@codeiq/db";
 import type {
   CheckoutInput,
   CheckoutResult,
+  GetInvoicesInput,
   IBillingInstallationRepository,
+  IBillingReviewRepository,
   IBillingService,
+  IGithubApiClient,
+  InvoicesResult,
   IProcessedEventRepository,
   IStripeClient,
   PlansResult,
   PortalResult,
+  SeatsResult,
   StripeCheckoutSessionObject,
   StripeSubscriptionObject,
+  SubscriptionResult,
   WebhookResult,
 } from "./billing.types";
 import { env } from "../../lib/env";
 import { AppError, BadRequestError } from "../../lib/errors";
 import type { IUserRepository } from "../auth/auth.types";
 import type { IRepoService } from "../repos/repo.types";
+
+const DEFAULT_INVOICES_LIMIT = 12;
+const MAX_INVOICES_LIMIT = 50;
 
 // Exact plan definitions from .ai/knowledge/domains/billing.md "Plan definitions".
 const PLANS: PlansResult["plans"] = [
@@ -38,6 +47,10 @@ const PLANS: PlansResult["plans"] = [
   },
 ];
 
+function unixToIso(seconds: number): string {
+  return new Date(seconds * 1000).toISOString();
+}
+
 function getPlanTierFromPriceId(priceId: string): PlanTier | null {
   if (priceId === env.STRIPE_PRICE_ID_PRO) return "PRO";
   if (priceId === env.STRIPE_PRICE_ID_TEAM) return "TEAM";
@@ -51,7 +64,9 @@ export class BillingService implements IBillingService {
     private readonly userRepo: IUserRepository,
     private readonly processedEventRepo: IProcessedEventRepository,
     private readonly repoService: IRepoService,
-    private readonly stripeClient: IStripeClient
+    private readonly stripeClient: IStripeClient,
+    private readonly githubApiClient: IGithubApiClient,
+    private readonly reviewRepo: IBillingReviewRepository
   ) {}
 
   getPlans(): PlansResult {
@@ -123,6 +138,99 @@ export class BillingService implements IBillingService {
       })
     );
     return { url: session.url };
+  }
+
+  async getSubscription(userId: string): Promise<SubscriptionResult> {
+    const installation = await this.installationRepo.findByUserId(userId);
+    if (!installation) {
+      throw new BadRequestError("No active subscription found");
+    }
+    if (!installation.stripeSubId || installation.planTier === "FREE") {
+      throw new BadRequestError("No active subscription found");
+    }
+
+    const [upcoming, paymentMethods] = await Promise.all([
+      // Not routed through tryStripe: Stripe throws here whenever there's no upcoming invoice
+      // (e.g. a subscription set to cancel at period end), which is an expected outcome for
+      // this field, not a 502-worthy failure — any rejection just means nextInvoice: null.
+      this.stripeClient.invoices
+        .createPreview({ customer: installation.stripeCustomerId! })
+        .catch(() => null),
+      this.tryStripe(() =>
+        this.stripeClient.paymentMethods.list({
+          customer: installation.stripeCustomerId!,
+          type: "card",
+        })
+      ),
+    ]);
+
+    const card = paymentMethods.data[0]?.card ?? null;
+
+    return {
+      planTier: installation.planTier as Exclude<PlanTier, "FREE">,
+      seatCount: installation.seatCount,
+      nextInvoice:
+        upcoming && upcoming.next_payment_attempt
+          ? { date: unixToIso(upcoming.next_payment_attempt), amount: upcoming.amount_due / 100 }
+          : null,
+      paymentMethod: card ? { brand: card.brand, last4: card.last4 } : null,
+    };
+  }
+
+  async getSeats(userId: string): Promise<SeatsResult> {
+    const installation = await this.installationRepo.findByUserId(userId);
+    if (!installation) {
+      throw new BadRequestError("No active subscription found");
+    }
+    if (installation.accountType !== "Organization") {
+      throw new BadRequestError("Seats are only available for organization installations");
+    }
+
+    let periodStart = new Date(0);
+    if (installation.stripeSubId) {
+      const sub = await this.tryStripe(() =>
+        this.stripeClient.subscriptions.retrieve(installation.stripeSubId!)
+      );
+      const item = sub.items.data[0];
+      if (item) periodStart = new Date(item.current_period_start * 1000);
+    }
+
+    const [members, reviewCounts] = await Promise.all([
+      this.githubApiClient.listOrgMembers(
+        installation.githubInstallationId,
+        installation.accountLogin
+      ),
+      this.reviewRepo.countReviewsByAuthorForInstallation(installation.id, periodStart),
+    ]);
+
+    return {
+      seats: members.map((m) => ({
+        login: m.login,
+        role: m.role,
+        prsReviewed: reviewCounts[m.login] ?? 0,
+      })),
+    };
+  }
+
+  async getInvoices(userId: string, input: GetInvoicesInput): Promise<InvoicesResult> {
+    const installation = await this.installationRepo.findByUserId(userId);
+    if (!installation?.stripeCustomerId) {
+      throw new BadRequestError("No billing history found");
+    }
+
+    const limit = Math.min(input.limit ?? DEFAULT_INVOICES_LIMIT, MAX_INVOICES_LIMIT);
+    const result = await this.tryStripe(() =>
+      this.stripeClient.invoices.list({ customer: installation.stripeCustomerId!, limit })
+    );
+
+    return {
+      invoices: result.data.map((inv) => ({
+        date: unixToIso(inv.created),
+        amount: inv.amount_paid / 100,
+        status: inv.status ?? "unknown",
+        pdfUrl: inv.hosted_invoice_url ?? "",
+      })),
+    };
   }
 
   async handleStripeWebhook(

@@ -1,6 +1,7 @@
 import { Octokit } from "@octokit/rest";
 import type {
   GithubInstallationMeta,
+  GithubOrgMember,
   GithubRepoListItem,
   GithubUserProfile,
   IGithubApiClient,
@@ -83,6 +84,24 @@ export class GithubApiClient implements IGithubApiClient {
         fullName: repo.full_name,
         language: repo.language ?? null,
       }));
+    } catch {
+      throw new AppError("GitHub API unavailable", 502);
+    }
+  }
+
+  // GitHub's org-membership API exposes exactly two roles — no "owner" distinct from "admin" —
+  // fetched with two role-filtered calls rather than one unfiltered call + a per-member lookup.
+  async listOrgMembers(githubInstallationId: number, org: string): Promise<GithubOrgMember[]> {
+    try {
+      const octokit = getInstallationOctokit(githubInstallationId);
+      const [admins, members] = await Promise.all([
+        octokit.rest.orgs.listMembers({ org, role: "admin", per_page: 100 }),
+        octokit.rest.orgs.listMembers({ org, role: "member", per_page: 100 }),
+      ]);
+      return [
+        ...admins.data.map((m) => ({ login: m.login, role: "admin" as const })),
+        ...members.data.map((m) => ({ login: m.login, role: "member" as const })),
+      ];
     } catch {
       throw new AppError("GitHub API unavailable", 502);
     }

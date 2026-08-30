@@ -1,6 +1,244 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-08-30 (Security fix: change-password now revokes all refresh tokens)
+- `codeiq29091993 Bot`'s automated PR review flagged (Critical/Security) that
+  `POST /auth/change-password` left every existing refresh token/session alive after a password
+  change — a documented, deliberately-deferred gap in `knowledge/domains/auth.md` since it was
+  first built. Closed it: `AuthService.changePassword` now calls a new
+  `IRefreshTokenRepository.deleteAllForUser(userId)` after updating `passwordHash`, revoking
+  every other session/device (the caller's own access token, 15 min TTL, is intentionally left
+  alone — same accepted trade-off `POST /auth/logout` already makes).
+- Since refresh tokens are Redis-backed (`refresh_token:<token>` → `userId`, ADR 006) with no
+  reverse index by user, `deleteAllForUser` does a cursor-based `SCAN … MATCH refresh_token:*` +
+  `MGET` + filter-by-value + `DEL` — the only key-pattern enumeration anywhere in this codebase
+  (every other Redis lookup is an exact key). A per-user Redis Set was considered and rejected:
+  it would reintroduce the "stale rows never cleaned up" problem ADR 006 moved off Postgres to
+  avoid, since naturally-expired tokens never remove themselves from a set. See ADR 006's new
+  2026-08-30 addendum and `knowledge/domains/auth.md`'s updated `POST /auth/change-password`
+  and refresh-token-storage sections.
+- New `refresh-token.repository.test.ts` (4 tests, mocks `../lib/redis` directly) covers the
+  SCAN/MGET/DEL logic in isolation (multi-page cursor, no matches, partial matches). Updated
+  `auth.service.test.ts` (+2 tests) and `auth.routes.test.ts` (+1 test) for the new call/mock.
+  Full suite verified: `pnpm typecheck`, `pnpm lint`, `pnpm test` (348/348) all pass clean.
+
+## 2026-08-25 (Fix: Onboarding's "Install the GitHub App" 404'd)
+- User reported (with a screenshot of GitHub's own 404 page) that clicking "Install the GitHub
+  App" on Onboarding led nowhere real. Two stacked bugs, not one:
+  1. `apps/web/.env`'s `NEXT_PUBLIC_GITHUB_APP_SLUG` was an unverified placeholder
+     (`codeiq-dev`) that had never corresponded to a real registered app. Confirmed the *real*
+     app exists and is reachable — `GET /app` via the app's own JWT (built from the already-
+     configured `GITHUB_APP_ID`/`GITHUB_APP_PRIVATE_KEY`) returned slug `codeiq29091993`
+     (name "CodeIQ29091993", id 4689964). Fixed locally in `apps/web/.env`.
+  2. `apps/web/Dockerfile` never threaded `NEXT_PUBLIC_GITHUB_APP_SLUG` through as a build arg
+     at all (only `NEXT_PUBLIC_API_URL` was) — Next.js inlines `NEXT_PUBLIC_*` vars into the
+     client bundle at *build* time, so the containerized build's install link had literally
+     baked in the string `"undefined"`, regardless of the host's `.env`. This is almost
+     certainly what the user's own browser hit, since `api-web-1` is the container that
+     normally serves port 3000. Fixed by adding the `ARG`/`ENV` pair to the Dockerfile and the
+     (non-secret — a GitHub App's slug is public) build arg to `docker-compose.yml`.
+  Rebuilt both `api`/`web` Docker images against current source (this also brought `api-api-1`
+  current with Steps 8–9, and `api-web-1` current with the entire Step 3–9 frontend work it had
+  never seen) and restarted them; no local `pnpm dev` processes left running afterward.
+  **Verified end-to-end, not just by reasoning about the fix**: grepped the rebuilt container's
+  `.next/static` chunks to confirm `codeiq29091993` is present and `codeiq-dev` is gone, then
+  drove a real click through a fresh Playwright browser against `localhost:3000` (a throwaway
+  DB user with no installation, so Onboarding's step 1 renders) and confirmed the button
+  navigates to the real `https://github.com/apps/codeiq29091993/installations/new`.
+  `.ai/knowledge/domains/github-app.md` updated with the real app's identity and both root
+  causes, so this doesn't get rediscovered from scratch next time.
+
+## 2026-08-25 (Frontend Step 9 — Polish)
+- User asked to verify the dashboard UI + APIs were complete, then to "start building" — Step 9
+  (Polish) was the one remaining `not-started` item in `plans/frontend.md`, so built it in full:
+  root error boundaries, Framer Motion page transitions, a keyboard-nav audit, an axe-core
+  accessibility pass, and mobile responsiveness at 375px. Frontend-only — no backend changes.
+  1. **`app/error.tsx` + `app/global-error.tsx`** — no route segment above the individual
+     `(dashboard)/*` pages had an error boundary before this, so (auth)/login,
+     (auth)/register, and root "/" had none. `global-error.tsx` renders its own `<html>/<body>`
+     (Next.js requirement — it replaces the root layout on error) with inline styles, since
+     next/font variables and Tailwind classes aren't available at that point.
+  2. **`components/providers/PageTransition.tsx`** — framer-motion fade+rise keyed by pathname,
+     wraps `(dashboard)/layout.tsx`'s `{children}`; respects `prefers-reduced-motion` via
+     `useReducedMotion` (collapses to an instant, motion-free swap rather than skipping the
+     wrapper, so layout stays identical either way). `framer-motion` was already a dependency,
+     unused until now.
+  3. **Mobile responsiveness** — `Sidebar.tsx` gained an optional `onNavigate` prop;
+     `(dashboard)/layout.tsx` rebuilt around it: below `lg`, the sidebar becomes a fixed
+     off-canvas drawer (slide-in, backdrop, Escape-to-close, auto-closes on navigation) behind a
+     hamburger button in a mobile-only top bar, replacing the always-visible 224px column that
+     made every screen unusable under ~1024px. Repos List and Reviews List's 5-column tables
+     wrapped in `overflow-x-auto` + `min-w-[640px]` so they scroll instead of crushing
+     illegibly. Every two-column panel built in Steps 4–7 (StatsGrid, RepoConfigPanel,
+     ReviewDetailContent's file rail, BillingContent, PlanCards, RepoInsightsPanel) already had
+     a `grid-cols-1` mobile fallback — nothing to change there.
+  4. **Keyboard-nav audit** — found `DangerZone`'s inline confirm dialog (a plain div, not a
+     native `<dialog>`) had no focus management: added focus-on-open (moves to Cancel) and
+     Escape-to-close; the new mobile drawer got the same Escape handling. Everything else
+     audited was already keyboard-operable from Steps 3–7 (custom row components use
+     `role="button"` + `tabIndex` + Enter-to-activate + `aria-label`; `Button` already had a
+     visible `focus-visible` ring).
+  5. **axe-core pass** — registered `jest-axe`'s `toHaveNoViolations` matcher globally in
+     `vitest.setup.ts`, added one `axe(container)` test to each of the 9 screen-level test
+     files. Found 2 real violations, not just passing tests: `RepoConfigPanel`'s two toggle
+     switches had no accessible name (`aria-label` added); `RepoCard`'s row was `role="button"`
+     wrapping a real `<button>` toggle — a "nested-interactive" violation. Fixed by wrapping only
+     the navigable cells in a `<button className="contents">` (drops out of the CSS Grid box
+     model so its children still lay out as direct grid items) so the toggle is a sibling, not a
+     descendant — updated the one `ReposList.test.tsx` case that queried the toggle as a DOM
+     descendant of the row to match. New dev dependency: `@types/jest-axe` (`jest-axe` itself
+     had no type declarations, which broke `next build`'s type-check step once
+     `vitest.setup.ts` imported it — invisible to `vitest` itself, which doesn't type-check).
+  96/96 `@codeiq/web` tests, monorepo-wide `pnpm turbo run typecheck lint build test` clean
+  (311/311 `@codeiq/api` unaffected). **Live browser verification**: found the running
+  `api-api-1` Docker container predated Step 8 (404 on `/auth/me`, 500 on `/reviews/stats`),
+  stopped it and ran `apps/api` via its own `pnpm dev` instead (same pattern as prior sessions);
+  seeded a second throwaway user directly into Postgres (`verify@codeiq.dev`'s password was
+  changed by Step 8's own live test and is no longer `TestPass123!`); drove the app with a fresh
+  Playwright install (scratchpad, not the repo) at 375px and 1440px — mobile drawer open/close/
+  Escape/auto-close-on-nav, tables scrolling instead of crushing, desktop layout unchanged, a
+  temporary throwing test route (added, screenshotted, then deleted) confirming `app/error.tsx`
+  renders correctly, and the DangerZone focus/Escape behavior. Also hit and diagnosed a Next.js
+  14 dev-server flake unrelated to this change (rapid client-side navigation right after a fresh
+  `.next` boot intermittently 404s a route that compiles and serves fine on retry after a clean
+  `.next` rebuild) — not a regression, just dev-mode route-cache flakiness. No console/page
+  errors beyond the two already-documented sandbox-credential gaps (`GET /billing/subscription`
+  400s with no real Stripe subscription; `GET /billing/seats` 502s with no real GitHub App
+  installation to query). `.ai/plans/frontend.md` Step 9 marked complete; `state/current.md`
+  updated, including the stale-password correction above.
+
+## 2026-08-23 (Mockup-fidelity pass — sidebar, headers, tables, real Overview widgets)
+- User pushback ("you are still missing a lot of details") after Step 8, with a screenshot of
+  the mockup's Design Notes screen — its sidebar showing a footer (installation switcher + user
+  row) that Step 1's original scaffold never built. Re-read the mockup's raw HTML directly
+  (still cached in the scratchpad from the original import) rather than relying on memory, and
+  found several real structural gaps across every screen, not just the sidebar:
+  1. **Sidebar** (`components/layout/Sidebar.tsx`): added the footer (installation switcher
+     linking to `/account?tab=workspace`, user row from the new `GET /auth/me`) and real nav
+     badge counts (repo count, review total — not the mockup's static 6/48).
+  2. **Every dashboard page was missing its breadcrumb + header CTA.** New shared
+     `components/layout/PageHeader.tsx` (breadcrumb + h1 + optional action), wired into all six
+     pages: Overview (no CTA), Repos ("Add repositories" → `/onboarding`), Reviews ("Export CSV"
+     — real client-side export via new `lib/csv.ts`, no backend endpoint needed), Billing
+     ("Update payment method" → the existing billing-portal mutation), Review Detail ("Open pull
+     request", moved out of an ad hoc flex row into the shared header), Account, Repo Detail,
+     Onboarding (both already had one-off breadcrumbs, replaced with the shared component).
+  3. **Repos List and Reviews List were plain card lists; the mockup is a real table** (header
+     row + grid columns). Rebuilt both: `RepoCard`/`RepoTableHeader` share `REPO_GRID_COLS`,
+     new `ReviewTableRow`/`ReviewTableHeader` for the dedicated Reviews List screen specifically
+     (the flex-row `ReviewCard` stays for Overview's "Recent reviews" and Repo Detail's Reviews
+     tab, which use the mockup's simpler embedded-list style, not the full table).
+  4. **`GET /repos` gained a real `lastReviewAt` field** — the mockup's repo table has a "Last
+     review" column that the original response shape had no data for. Backend:
+     `repo.repository.ts`'s `findManyForUser`/`findByIdForUser` now select the latest review's
+     `createdAt` in the same query (`reviews: { take: 1, orderBy: createdAt desc }`), not a
+     second round trip. `SanitizedRepo`/`@codeiq/types` `Repo` both gained the field.
+  5. **Overview gained the mockup's two remaining widgets**: `RunningReviewsBanner` (real
+     `GET /reviews?status=RUNNING` query, not mock state) and `SeatsCard` ("N of M seats",
+     needs a real subscription — omitted entirely rather than shown broken when unsubscribed).
+  6. **Repo Detail's tab order fixed** to match the mockup (Reviews, Configuration, Insights —
+     Configuration stays the default *active* tab, but its position in the tab bar was wrong).
+  Backend repo-lookup shape change broke 17 existing route tests that mocked `prisma.repo.*`
+  directly without a `reviews` field — fixed by adding `reviews: []` to both files' `buildRepo`
+  fixtures. 311/311 `@codeiq/api`, 86/86 `@codeiq/web` tests still pass (no test needed
+  meaningful rewrites — most query by text/role, not DOM structure, so the table/card swap
+  didn't break them). Verified live in a browser again (same seeded data): this pass found zero
+  new bugs — the only console noise was the same two expected sandbox-credential gaps already
+  known (no real Stripe subscription, no real GitHub App installation for the seats call).
+  `knowledge/screens/dashboard-screens.md`, `knowledge/domains/repos.md`, and
+  `knowledge/technical/frontend/design-system.md` updated to match.
+
+## 2026-08-23 (Frontend Step 8 — Account & Workspace settings)
+- User asked "you forgot to include the account management of user" after Step 7 — not part of
+  the mockup, which has no account/settings screen at all. Clarified scope via AskUserQuestion:
+  user meant **both** personal profile management (nothing existed — no docs, no API) and
+  workspace/installation settings (already spec'd as `/workspace` in `billing-screens.md`,
+  backend already existed via `DELETE /github/installations/:id`, just never built).
+  Built both as two tabs of one `/account` route (`knowledge/screens/account-screens.md`, new),
+  same tabbed-page pattern as Repo Detail — not two separate top-level sidebar entries.
+  **Backend**: `GET /auth/me`, `PATCH /auth/me` (name only — email is deliberately not
+  editable, documented as a real gap tied to the OTP-verification identity flow),
+  `POST /auth/change-password` (rejects GitHub-only accounts with no `passwordHash`, doesn't
+  revoke other sessions — also documented gaps, not silently done). 298 → 311 `@codeiq/api`
+  tests.
+  **Frontend**: `ProfileForm`, `ChangePasswordForm` (hidden entirely for GitHub-only accounts),
+  `WorkspacePanel`, `DangerZone` (inline confirm dialog, not a shared Modal — only caller so
+  far). Fixed `billing-screens.md`'s stale `/install` redirect target to the real `/onboarding`
+  route along the way. 77 → 86 `@codeiq/web` tests.
+  **Live browser verification** (same seeded Postgres data from Step 3–7's session): edited the
+  profile name, tried a change-password with a wrong current password (got the correct inline
+  error), then the correct one (form cleared, success message), viewed the Workspace tab, and
+  opened + cancelled the danger-zone confirm dialog — all worked correctly on the first pass,
+  zero console/page errors. No bugs found this round.
+
+## 2026-08-23 (Frontend Steps 3–7 — CodeIQ Dashboard mockup implementation)
+- Imported the Claude Design mockup `CodeIQ Dashboard.dc.html` (+ `support.js`) via the
+  `claude_design` MCP and implemented it end to end in one session, committing after each part.
+  Full detail lives in `plans/frontend.md` Steps 3–7 and the rewritten `knowledge/screens/
+  {onboarding,dashboard,billing}-screens.md` — not duplicating it here. Headline items:
+  1. **Docs first**: rewrote Repo Detail (one tabbed page, not two routes) and Review Detail
+     (file-rail/issue-panel split, not an accordion) in `dashboard-screens.md`; new
+     `onboarding-screens.md`; rewrote `billing-screens.md` around plan cards/seats/invoices;
+     added 3 new endpoints to `knowledge/domains/billing.md` and 1 to `repos.md`; flagged the
+     mockup's own three open product questions (Insights tab, issue Dismiss button, seat
+     source) in `state/blockers.md` with the pragmatic default taken for each.
+  2. **Backend**: `GET /billing/{subscription,seats,invoices}` (seats resolve via GitHub org
+     membership, not a locally-invited list) and `GET /repos/:repoId`. Stripe SDK v22 renamed
+     `retrieveUpcoming` → `createPreview` and moved `current_period_start` from the subscription
+     onto its line items — both real API-surface facts discovered via typecheck, not assumed.
+     296/296 `@codeiq/api` tests pass.
+  3. **Frontend**: Onboarding (3-step install flow), Overview (stats/recent-reviews/category
+     breakdown), Repos (list + tabbed detail), Reviews (list + split-layout detail, polling),
+     Billing (plan cards/seats/invoices) — 5 screens, ~40 new components/hooks/pages. Reused
+     `ReviewCard`/`StatusBadge` across 3 screens rather than duplicating row rendering. Found
+     and fixed a real MSW handler-ordering bug (`/api/reviews/:reviewId` was greedily matching
+     `/api/reviews/stats`). 77/77 `@codeiq/web` tests pass; every screen individually
+     `typecheck`/`lint`/`build`/`test` verified before moving to the next.
+  Several mockup-vs-reality gaps resolved by building against what's real rather than what the
+  mockup's mock data showed: Overview's stat cards use real `GET /reviews/stats` fields (no
+  week-over-week delta — no historical data exists); list-view review rows show status only (no
+  per-review severity counts — `GET /reviews` doesn't return them); `IssueCard` has no diff
+  snippet (`ReviewIssue` has no diff column); Billing plan cards render real pricing from
+  `GET /billing/plans`, not the mockup's placeholder numbers (which conflict with the actually-
+  configured Stripe prices).
+  4. **Live browser verification** (CLAUDE.md's "test in a browser" rule) — seeded a real user +
+     installation + repos + reviews + issues directly into the local Postgres via a throwaway
+     script (registration needs an emailed OTP this sandbox can't receive), ran `apps/api` and
+     `apps/web` via `pnpm dev` against it, and drove every new screen with a fresh Playwright
+     install (browser binary was already cached from Step 2's session; the `playwright` npm
+     package was installed into the scratchpad, not the repo). Found and fixed two real bugs
+     neither typecheck nor the 373 mocked tests caught, because every mock already matched what
+     the code assumed rather than what the server actually returns:
+     - **`validateQuery` middleware silently discarded all `z.coerce` results.** Express 5's
+       `req.query` is a non-caching getter — it re-parses `req.url` on every access, so
+       `Object.assign(req.query, coerced)` mutated a throwaway object and every numeric/boolean
+       query param (`page`/`limit`/`days`/`isActive`) reached Prisma as a raw string, crashing
+       `GET /reviews` with a `PrismaClientValidationError` the instant a real page/limit param
+       was sent — which no prior screen had ever done. Fixed by replacing the getter with
+       `Object.defineProperty(req, "query", { value: result.data, ... })` instead of mutating
+       it; added `validate.middleware.test.ts` (2 tests, exercises a real Express app, not a
+       mocked `req.query` object) since this exact bug shape is invisible to every existing
+       route/service test.
+     - **`useReview`/`useRetryReview` didn't unwrap the `{ review: ... }` envelope.**
+       `GetReviewResult`/`RetryReviewResult` wrap the review in a `review` key (unlike the
+       `/reviews` list, which doesn't) — the hooks read `r.data.data` directly, so
+       `fileGroups`'s `for (const issue of review.issues)` crashed with "filtered is not
+       iterable" on every Review Detail page. Fixed the two hooks and the MSW mocks that had
+       matched the same wrong shape (`mocks/handlers.ts` and both review test files).
+     - Also fixed a real (if minor) cosmetic bug while looking at the Overview screen for real:
+       `RecentReviewsList` showed the raw repo `cuid` instead of its full name (`ReviewCard`'s
+       `repoName` prop was only ever wired up on the Reviews List screen).
+     All 5 screens re-verified clean (no console/page errors) after the fixes; Billing correctly
+     shows its FREE-tier empty state (real 400) and Seats correctly shows a failed-fetch state
+     (real 502 — this sandbox has no real GitHub App installation to query), which is the
+     designed behavior for missing credentials, not a bug. 298/298 `@codeiq/api` and 77/77
+     `@codeiq/web` tests pass after the fixes. Seed data (`verify@codeiq.dev` / a fake `acme-corp`
+     installation with 3 repos and 4 reviews) was left in the local dev Postgres — harmless, and
+     useful for exploring the new screens; the stale `api-api-1` Docker container (built before
+     this session, superseded by `pnpm dev` for this verification) was stopped, not restarted —
+     rebuild it (`docker compose build api`) to pick up this session's backend changes before
+     relying on it again.
+
 ## 2026-08-23 (Frontend Step 2 — Auth screens)
 - Built login and register screens end to end: `(auth)/login/page.tsx` + `LoginForm.tsx`,
   `(auth)/register/page.tsx` + `RegisterForm.tsx`, `components/providers/AuthProvider.tsx`,

@@ -77,11 +77,13 @@ describe("AuthService", () => {
       lockEmail: vi.fn(),
       findByGithubId: vi.fn(),
       linkGithubIdentity: vi.fn(),
+      update: vi.fn(),
     };
     refreshTokenRepo = {
       create: vi.fn(),
       findByToken: vi.fn(),
       deleteByToken: vi.fn(),
+      deleteAllForUser: vi.fn(),
     };
     otpRepo = {
       upsertForUser: vi.fn(),
@@ -466,6 +468,111 @@ describe("AuthService", () => {
         authService.logout("user-1", { refreshToken: "not-mine" })
       ).rejects.toBeInstanceOf(ForbiddenError);
       expect(refreshTokenRepo.deleteByToken).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getMe", () => {
+    it("returns the current user's sanitized profile", async () => {
+      (userRepo.findById as ReturnType<typeof vi.fn>).mockResolvedValue(buildUser());
+
+      const result = await authService.getMe("user-1");
+
+      expect(result.user).toEqual({
+        id: "user-1",
+        email: "user@example.com",
+        name: "Ada Lovelace",
+        githubId: null,
+        githubLogin: null,
+        createdAt: NOW,
+      });
+    });
+  });
+
+  describe("updateProfile", () => {
+    it("updates the user's name", async () => {
+      (userRepo.update as ReturnType<typeof vi.fn>).mockResolvedValue(
+        buildUser({ name: "New Name" })
+      );
+
+      const result = await authService.updateProfile("user-1", { name: "New Name" });
+
+      expect(userRepo.update).toHaveBeenCalledWith("user-1", { name: "New Name" });
+      expect(result.user.name).toBe("New Name");
+    });
+
+    it("trims whitespace from the name before storing", async () => {
+      (userRepo.update as ReturnType<typeof vi.fn>).mockResolvedValue(buildUser());
+
+      await authService.updateProfile("user-1", { name: "  Padded  " });
+
+      expect(userRepo.update).toHaveBeenCalledWith("user-1", { name: "Padded" });
+    });
+  });
+
+  describe("changePassword", () => {
+    it("updates the password hash when current password is correct", async () => {
+      const currentHash = await bcrypt.hash("old-password", 4);
+      (userRepo.findById as ReturnType<typeof vi.fn>).mockResolvedValue(
+        buildUser({ passwordHash: currentHash })
+      );
+
+      await authService.changePassword("user-1", {
+        currentPassword: "old-password",
+        newPassword: "new-password-123",
+      });
+
+      expect(userRepo.update).toHaveBeenCalledWith(
+        "user-1",
+        expect.objectContaining({ passwordHash: expect.any(String) })
+      );
+      const newHash = (userRepo.update as ReturnType<typeof vi.fn>).mock.calls[0]![1].passwordHash;
+      expect(await bcrypt.compare("new-password-123", newHash)).toBe(true);
+    });
+
+    it("revokes all existing refresh tokens for the user after a successful change", async () => {
+      const currentHash = await bcrypt.hash("old-password", 4);
+      (userRepo.findById as ReturnType<typeof vi.fn>).mockResolvedValue(
+        buildUser({ passwordHash: currentHash })
+      );
+
+      await authService.changePassword("user-1", {
+        currentPassword: "old-password",
+        newPassword: "new-password-123",
+      });
+
+      expect(refreshTokenRepo.deleteAllForUser).toHaveBeenCalledWith("user-1");
+      expect(refreshTokenRepo.deleteAllForUser).toHaveBeenCalledTimes(1);
+    });
+
+    it("throws UnauthorizedError when current password is incorrect", async () => {
+      const currentHash = await bcrypt.hash("old-password", 4);
+      (userRepo.findById as ReturnType<typeof vi.fn>).mockResolvedValue(
+        buildUser({ passwordHash: currentHash })
+      );
+
+      await expect(
+        authService.changePassword("user-1", {
+          currentPassword: "wrong-password",
+          newPassword: "new-password-123",
+        })
+      ).rejects.toBeInstanceOf(UnauthorizedError);
+      expect(userRepo.update).not.toHaveBeenCalled();
+      expect(refreshTokenRepo.deleteAllForUser).not.toHaveBeenCalled();
+    });
+
+    it("throws BadRequestError for a GitHub-only account with no passwordHash", async () => {
+      (userRepo.findById as ReturnType<typeof vi.fn>).mockResolvedValue(
+        buildUser({ passwordHash: null })
+      );
+
+      await expect(
+        authService.changePassword("user-1", {
+          currentPassword: "anything",
+          newPassword: "new-password-123",
+        })
+      ).rejects.toBeInstanceOf(BadRequestError);
+      expect(userRepo.update).not.toHaveBeenCalled();
+      expect(refreshTokenRepo.deleteAllForUser).not.toHaveBeenCalled();
     });
   });
 });

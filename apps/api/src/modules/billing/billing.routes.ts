@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { CheckoutSchema } from "./billing.validator";
+import { CheckoutSchema, GetInvoicesQuerySchema } from "./billing.validator";
 import { billingController } from "../../container";
 import { authMiddleware } from "../../middlewares/auth.middleware";
-import { validate } from "../../middlewares/validate.middleware";
+import { validate, validateQuery } from "../../middlewares/validate.middleware";
 
 // `/billing/webhook` has no authMiddleware — Stripe authenticates via signature only
 // (.ai/rules/backend.md route-audience table). Its raw-body parser is mounted in app.ts at
@@ -45,6 +45,44 @@ billingRoutes.post(
  *       - bearerAuth: []
  */
 billingRoutes.post("/portal", authMiddleware, billingController.createPortal);
+
+/**
+ * @swagger
+ * /billing/subscription:
+ *   get:
+ *     summary: Current plan, seat count, and next invoice summary
+ *     tags: [Billing]
+ *     security:
+ *       - bearerAuth: []
+ */
+billingRoutes.get("/subscription", authMiddleware, billingController.getSubscription);
+
+/**
+ * @swagger
+ * /billing/seats:
+ *   get:
+ *     summary: GitHub org members with role and PR review count for the current period
+ *     tags: [Billing]
+ *     security:
+ *       - bearerAuth: []
+ */
+billingRoutes.get("/seats", authMiddleware, billingController.getSeats);
+
+/**
+ * @swagger
+ * /billing/invoices:
+ *   get:
+ *     summary: Paginated Stripe invoice history
+ *     tags: [Billing]
+ *     security:
+ *       - bearerAuth: []
+ */
+billingRoutes.get(
+  "/invoices",
+  authMiddleware,
+  validateQuery(GetInvoicesQuerySchema),
+  billingController.getInvoices
+);
 
 /**
  * @swagger

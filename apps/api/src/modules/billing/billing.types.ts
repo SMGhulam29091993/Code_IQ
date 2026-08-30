@@ -1,4 +1,5 @@
 import type { Installation, PlanTier } from "@codeiq/db";
+import type { GithubOrgMember, IGithubApiClient } from "../github/github.types";
 
 // .ai/knowledge/domains/billing.md "Plan definitions". PRO/TEAM carry a real Stripe price ID;
 // FREE has none — it's never checked out (see BillingService.createCheckout's FREE-tier guard).
@@ -32,14 +33,52 @@ export interface WebhookResult {
   message: string;
 }
 
+// New 2026-08-23 — .ai/knowledge/domains/billing.md "GET /billing/subscription" /
+// "GET /billing/seats" / "GET /billing/invoices", backing the Billing screen
+// (knowledge/screens/billing-screens.md) rewritten against the Claude Design mockup.
+export interface SubscriptionResult {
+  planTier: Exclude<PlanTier, "FREE">;
+  seatCount: number;
+  nextInvoice: { date: string; amount: number } | null;
+  paymentMethod: { brand: string; last4: string } | null;
+}
+
+export interface SeatsResult {
+  seats: Array<{ login: string; role: GithubOrgMember["role"]; prsReviewed: number }>;
+}
+
+export interface GetInvoicesInput {
+  limit?: number;
+}
+
+export interface InvoicesResult {
+  invoices: Array<{ date: string; amount: number; status: string; pdfUrl: string }>;
+}
+
 export interface IBillingService {
   getPlans(): PlansResult;
   createCheckout(userId: string, input: CheckoutInput): Promise<CheckoutResult>;
   createPortal(userId: string): Promise<PortalResult>;
+  getSubscription(userId: string): Promise<SubscriptionResult>;
+  getSeats(userId: string): Promise<SeatsResult>;
+  getInvoices(userId: string, input: GetInvoicesInput): Promise<InvoicesResult>;
   // rawBody must be the untouched request bytes — see app.ts's express.raw() mount for
   // /api/billing/webhook and .ai/memory/pitfalls.md #001.
   handleStripeWebhook(rawBody: Buffer, signature: string | undefined): Promise<WebhookResult>;
 }
+
+// Narrow slice of IReviewRepository — BillingService only ever needs the per-author count for
+// GET /billing/seats, not the rest of the review module's surface.
+export interface IBillingReviewRepository {
+  countReviewsByAuthorForInstallation(
+    installationId: string,
+    since: Date
+  ): Promise<Record<string, number>>;
+}
+
+// Re-exported so BillingService's constructor signature doesn't need a direct import from
+// modules/github — same "interfaces cross layer boundaries" stance as IBillingInstallationRepository.
+export type { IGithubApiClient };
 
 export interface IProcessedEventRepository {
   exists(eventId: string): Promise<boolean>;
@@ -82,7 +121,30 @@ export interface IStripePortalSession {
 
 export interface IStripeSubscription {
   id: string;
-  items: { data: Array<{ price: { id: string }; quantity?: number }> };
+  // `current_period_start` lives on each subscription item (not the subscription itself) as of
+  // Stripe's 2025 API versions — used by BillingService.getSeats to window "reviews in the
+  // current billing period" (.ai/knowledge/domains/billing.md), read off items.data[0].
+  items: {
+    data: Array<{ price: { id: string }; quantity?: number; current_period_start: number }>;
+  };
+}
+
+export interface IStripeUpcomingInvoice {
+  amount_due: number;
+  // Unix seconds the invoice is expected to be charged — null is possible on some preview
+  // shapes; getSubscription treats a null/missing upcoming invoice as `nextInvoice: null`.
+  next_payment_attempt: number | null;
+}
+
+export interface IStripeInvoice {
+  created: number; // unix seconds
+  amount_paid: number;
+  status: string | null;
+  hosted_invoice_url?: string | null;
+}
+
+export interface IStripePaymentMethod {
+  card?: { brand: string; last4: string };
 }
 
 export interface IStripeEvent {
@@ -114,6 +176,16 @@ export interface IStripeClient {
   };
   subscriptions: {
     retrieve(id: string): Promise<IStripeSubscription>;
+  };
+  invoices: {
+    // Stripe SDK v22 renamed the classic "retrieve upcoming invoice" call to createPreview.
+    // Throws when there's no upcoming invoice (e.g. a subscription set to cancel at period
+    // end) — BillingService.getSubscription catches that and returns `nextInvoice: null`.
+    createPreview(params: { customer: string }): Promise<IStripeUpcomingInvoice>;
+    list(params: { customer: string; limit: number }): Promise<{ data: IStripeInvoice[] }>;
+  };
+  paymentMethods: {
+    list(params: { customer: string; type: "card" }): Promise<{ data: IStripePaymentMethod[] }>;
   };
   webhooks: {
     constructEvent(payload: string | Buffer, signature: string, secret: string): IStripeEvent;

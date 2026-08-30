@@ -47,4 +47,4 @@ The dashboard config is a fallback for repos without committed config. Once a te
 | Auth token storage | JWT in `Authorization` header | Same (no plan to change) |
 | DB client | Prisma | Same |
 | Queue | BullMQ + Redis | Same |
-| AI model | Gemini 1.5 Pro | Configurable per installation (future) |
+| AI model | Gemini 2.5 Flash (`src/lib/gemini.ts`) — was Gemini 1.5 Pro until Google fully retired it; Pro-tier models (2.5-pro, 3.1-pro-preview) have a hard 0 free-tier quota without billing enabled, so Flash was chosen to work without a paid plan (found/decided 2026-08-26, see `plans/backend.md` Step 5) | Configurable per installation (future); revisit Pro tier if billing gets enabled |
