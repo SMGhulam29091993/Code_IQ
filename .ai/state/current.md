@@ -1,6 +1,24 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
+## 2026-09-06 (New: OpenRouter multi-model fallback — decisions/008)
+Root cause of "PRs failing today" traced to Gemini's undocumented 20-requests/day free-tier
+quota (separate from the per-minute quota already handled). Built a proper multi-model fallback
+chain rather than a one-line swap: `ILLMClient` (renamed from `IGeminiClient`) is the seam,
+`lib/gemini.ts` + new `lib/openrouter.ts` (Adapters) implement it, `lib/llm-client.ts`'s
+`RetryingLLMClient` (Decorator) + `FallbackLLMClient` (Composite) compose Gemini-then-5-
+OpenRouter-models into one client wired into `container.ts`. Full design, and two real bugs
+found live-testing against the real APIs (a daily-quota 429 wrongly treated as retryable; an
+OpenRouter free-tier 400 that's actually a mislabeled capacity error), in `decisions/008` and
+`state/completed.md`'s entry. **Known open item, not this session's to fix**: the OpenRouter key
+has zero lifetime spend and hit what looks like an account-level free-tier request ceiling
+during this session's live-testing — recommended a one-time $10 credit purchase to raise it,
+user's call. Also known but explicitly deferred by the user this session: the two permanently
+`RUNNING` reviews from 2026-08-25 (orphaned, need a manual DB fix) and the live Docker
+containers being 11 days stale (need a rebuild to pick up Step 8 + all of today's work,
+including this OpenRouter change) — neither touched. `pnpm --filter @codeiq/api test` (363/363)
+clean.
+
 ## 2026-09-06 side fixes (unrelated to the active task below)
 Three `codeiq29091993 Bot` Warning/Logic findings closed this session, plus one new piece of
 tooling the bot's own review suggested:

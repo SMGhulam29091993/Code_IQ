@@ -94,6 +94,7 @@ Turborepo monorepo
 - `decisions/005-pgvector-over-pinecone.md` *(future)*
 - `decisions/006-redis-for-refresh-tokens.md`
 - `decisions/007-chunk-level-fanout-review-pipeline.md`
+- `decisions/008-openrouter-multi-model-fallback.md`
 
 ## Memory
 - `memory/lessons.md`

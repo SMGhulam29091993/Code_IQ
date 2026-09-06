@@ -7,7 +7,7 @@ import { ReviewChunkJobProcessor } from "./jobs/review-chunk.job";
 import { ReviewCoordinatorJobProcessor } from "./jobs/review-coordinator.job";
 import { ReviewFinalizeJobProcessor } from "./jobs/review-finalize.job";
 import { FairnessService } from "./lib/fairness";
-import { geminiModel } from "./lib/gemini";
+import { llmClient } from "./lib/llm-client";
 import { redis } from "./lib/redis";
 import { stripeClient } from "./lib/stripe";
 import { AuthController } from "./modules/auth/auth.controller";
@@ -102,7 +102,7 @@ export const billingController = new BillingController(billingService);
 const reviewIssueRepository = new ReviewIssueRepository();
 const reviewChunkRepository = new ReviewChunkRepository();
 const diffService = new DiffService();
-const geminiService = new GeminiService(geminiModel);
+const geminiService = new GeminiService(llmClient);
 const commentService = new CommentService();
 const fairnessService = new FairnessService(redis);
 

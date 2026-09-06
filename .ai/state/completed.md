@@ -1,6 +1,60 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-09-06 (New: OpenRouter multi-model fallback for the review pipeline — decisions/008)
+- Root cause of "every review today failed" traced to a quota nobody had noticed: Gemini
+  2.5 Flash's free tier caps at **20 requests/day** (`GenerateRequestsPerDayPerProjectPerModel-
+  FreeTier`), separate from the requests-per-minute quota already handled 2026-08-26. Real usage
+  this session (several real PRs reviewed) exhausted it; 7 real `Review` rows show
+  `status: FAILED` with the exact quota error. Also found while investigating: 2 `Review` rows
+  from 2026-08-25 permanently stuck `RUNNING` (the interrupted-session reviews already flagged in
+  `state/current.md`, orphaned when their worker died with the container — unrelated to today's
+  quota issue, not fixed this session) and the live Docker containers were running code from
+  2026-08-26, 11 days stale (missing all of Step 8 and everything from today) — also not
+  rebuilt this session per explicit user choice ("not yet").
+- Built per explicit user request, after discussing NVIDIA Nemotron and OpenRouter as
+  alternatives: a proper multi-model fallback chain, not a one-line provider swap. Full design
+  in `decisions/008` — summary: `ILLMClient` (renamed from `IGeminiClient`, `review.types.ts`)
+  is the seam; `lib/gemini.ts`'s existing client and the new `lib/openrouter.ts`'s
+  `OpenRouterClient` (Adapter) both implement it; `lib/llm-client.ts`'s `RetryingLLMClient`
+  (Decorator — retry-with-backoff, moved out of `GeminiService`) wraps each, and
+  `FallbackLLMClient` (Composite/Chain of Responsibility) tries Gemini first then each
+  `OPEN_ROUTER_MODELS` entry in order; `buildLLMClient()` (Factory) composes it all, wired into
+  `container.ts` in place of the direct `geminiModel` import. `GeminiService` itself got
+  *simpler* — it lost its own retry loop entirely.
+- Live-testing this file against the real Gemini and OpenRouter APIs (not just mocks) surfaced
+  two real bugs no amount of mock-based testing would have caught, both fixed and covered by new
+  tests before considering this done:
+  1. A naive "429 = retry" rule wasted minutes retrying Gemini's *daily* quota error with
+     Google's suggested per-attempt delay before ever reaching OpenRouter — a daily cap doesn't
+     clear in under a minute regardless of what delay Google suggests. Fixed:
+     `isRetryableError` special-cases a `quotaId` containing `"PerDay"` as non-retryable.
+  2. OpenRouter's free models run on unreserved shared capacity — the *exact same* request
+     against the *exact same* model returned a proper 429 one moment and a misleading 400
+     `"messages.0.content: Invalid input"` the next, purely from upstream congestion. Fixed:
+     `OpenRouterClient`'s `LLMClientError` carries its own `retryable` flag (true unless
+     401/403) rather than leaving classification to a generic status-code check.
+  Also found live: this OpenRouter key has zero lifetime spend (`usage: 0` on `GET /api/v1/key`)
+  and, after roughly 30 test requests in 15 minutes, started returning that same generic 400
+  across *every* configured model simultaneously — consistent with OpenRouter's documented low
+  default request ceiling for free accounts that have never purchased credit. This is an
+  account-level throttle, invisible to the per-model fallback logic (every tier fails together).
+  Recommended fix (not done — billing action, user's call): a one-time $10 OpenRouter credit
+  purchase, which OpenRouter ties to a meaningfully higher free-tier ceiling.
+  Default `OPEN_ROUTER_MODELS` (5 models) chosen from a live snapshot of
+  `openrouter.ai/api/v1/models`'s free tier and verified individually to return real parseable
+  JSON under `response_format: json_object` — swapped once already after the first 3 picks
+  turned out to be under heavy contemporaneous shared-pool load (confirmed by testing other free
+  models successfully at the same moment).
+- New: `apps/api/src/lib/openrouter.ts`, `apps/api/src/lib/llm-client.ts`,
+  `apps/api/src/__tests__/openrouter-client.test.ts`, `apps/api/src/__tests__/llm-client.test.ts`
+  (migrated the existing Gemini retry-on-429 tests here from `gemini.service.test.ts`, plus new
+  fallback/daily-quota/OpenRouter-retryable-classification tests). Env: `OPEN_ROUTER_API_KEY`
+  (required), `OPEN_ROUTER_MODELS` (optional, has a default) added to `env.ts`/`.env.example`/
+  `vitest.setup.ts`. `pnpm --filter @codeiq/api test` (363/363), typecheck, and lint all clean.
+  `knowledge/domains/review.md`, `knowledge/technical/backend/architecture.md`, and
+  `decisions/008` updated/created.
+
 ## 2026-09-06 (New: automated GitHub App slug drift check)
 - `codeiq29091993 Bot`'s own review of the 2026-08-25 slug-drift incident (see that entry in
   this file) suggested "regularly verify GitHub App configuration... implement automated

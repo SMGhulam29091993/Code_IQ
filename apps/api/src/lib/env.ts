@@ -41,6 +41,17 @@ const envSchema = z.object({
   // Gemini 1.5 Pro — review pipeline (.ai/plans/backend.md Step 5).
   GEMINI_API_KEY: z.string().min(1),
 
+  // OpenRouter — multi-model fallback tier for the review pipeline (decisions/008, 2026-09-06),
+  // added after Gemini's 20-requests/day free-tier quota started failing every review outright
+  // once real usage exceeded it. lib/llm-client.ts's buildLLMClient tries Gemini first, then
+  // each model listed here in order (comma-separated, tried left to right) — see
+  // .env.example for the default list and how to verify/change it.
+  OPEN_ROUTER_API_KEY: z.string().min(1),
+  OPEN_ROUTER_MODELS: z
+    .string()
+    .min(1)
+    .default("cohere/north-mini-code:free,minimax/minimax-m2.7:free,liquid/lfm-2.5-2.6b:free,nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free,dots-studio/dots-3-note-preview:free"),
+
   // Stripe — billing module (.ai/plans/backend.md Step 6). Price IDs map 1:1 to
   // PlanTier ('FREE' has none — it's never checked out). See .ai/knowledge/domains/billing.md.
   STRIPE_SECRET_KEY: z.string().min(1),

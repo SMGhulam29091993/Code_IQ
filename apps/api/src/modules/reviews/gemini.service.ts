@@ -1,19 +1,16 @@
-import type { GeminiIssue, GeminiReviewResult, IGeminiClient, IGeminiService } from "./review.types";
+import type { GeminiIssue, GeminiReviewResult, IGeminiService, ILLMClient } from "./review.types";
 import { GeminiReviewResultSchema, GeminiSummaryResultSchema } from "./review.validator";
 import type { SanitizedRepoConfig } from "../repos/repo.types";
 
-const MAX_RETRIES = 3;
-const MAX_BACKOFF_MS = 15_000;
-
-// Exact pseudocode from .ai/knowledge/domains/review.md "gemini.service.ts", plus retry-on-429
-// added 2026-08-26 — the free tier's requests-per-minute quota (5/min on gemini-2.5-flash) was
-// getting hit on any PR with more than a handful of chunks, and every call (reviewDiff *and*
-// summarizePR) was unprotected, so a single rate-limit hit failed the whole review. See
-// review.job.ts's mapWithConcurrency for the complementary fix (capping how many calls fire at
-// once) — this retry is still needed on its own, since summarizePR runs after all chunks and
-// isn't covered by the chunk-level concurrency cap at all.
+// Exact pseudocode from .ai/knowledge/domains/review.md "gemini.service.ts". Retry-with-backoff
+// and multi-model fallback used to live in this class (added 2026-08-26 for Gemini's
+// requests-per-minute quota) but moved down into the injected `ILLMClient` itself — see
+// lib/llm-client.ts's RetryingLLMClient/FallbackLLMClient (decisions/008) — once the client
+// stopped being just Gemini. This class now only owns prompt-building and response
+// parsing/validation; it neither knows nor cares whether `llmClient` is a single model or a
+// whole fallback chain.
 export class GeminiService implements IGeminiService {
-  constructor(private readonly geminiClient: IGeminiClient) {}
+  constructor(private readonly llmClient: ILLMClient) {}
 
   async reviewDiff(
     patch: string,
@@ -21,12 +18,10 @@ export class GeminiService implements IGeminiService {
     filename: string
   ): Promise<GeminiReviewResult> {
     const systemInstruction = buildSystemPrompt(config, filename);
-    const result = await withGeminiRetry(() =>
-      this.geminiClient.generateContent({
-        systemInstruction,
-        contents: [{ role: "user", parts: [{ text: patch }] }],
-      })
-    );
+    const result = await this.llmClient.generateContent({
+      systemInstruction,
+      contents: [{ role: "user", parts: [{ text: patch }] }],
+    });
     const raw: unknown = JSON.parse(result.response.text());
     return GeminiReviewResultSchema.parse(raw);
   }
@@ -36,61 +31,18 @@ export class GeminiService implements IGeminiService {
     issues: Array<GeminiIssue & { file: string }>
   ): Promise<string> {
     const systemInstruction = buildSummaryPrompt();
-    const result = await withGeminiRetry(() =>
-      this.geminiClient.generateContent({
-        systemInstruction,
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: JSON.stringify({ prTitle, issues }) }],
-          },
-        ],
-      })
-    );
+    const result = await this.llmClient.generateContent({
+      systemInstruction,
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: JSON.stringify({ prTitle, issues }) }],
+        },
+      ],
+    });
     const raw: unknown = JSON.parse(result.response.text());
     return GeminiSummaryResultSchema.parse(raw).summary;
   }
-}
-
-// Retries only the API call itself — JSON.parse/schema-validation failures happen outside this
-// wrapper at each call site, so a malformed-response error is never retried here (retrying the
-// exact same request wouldn't fix a bad response shape; that's the existing
-// skip-and-log-a-warning path in review.job.ts's per-chunk handling).
-async function withGeminiRetry<T>(fn: () => Promise<T>): Promise<T> {
-  let lastErr: unknown;
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastErr = err;
-      if (attempt === MAX_RETRIES) break;
-      await sleep(getRetryDelayMs(err) ?? exponentialBackoffMs(attempt));
-    }
-  }
-  throw lastErr;
-}
-
-// The Gemini SDK's 429 error carries Google's own suggested wait time in a structured
-// RetryInfo detail (e.g. "Please retry in 8.6s") — using it directly avoids guessing at a
-// backoff that's shorter than what the quota actually needs.
-function getRetryDelayMs(err: unknown): number | null {
-  const details = (err as { errorDetails?: Array<Record<string, unknown>> } | undefined)
-    ?.errorDetails;
-  const retryInfo = details?.find(
-    (d) => d["@type"] === "type.googleapis.com/google.rpc.RetryInfo"
-  );
-  const raw = retryInfo?.retryDelay;
-  if (typeof raw !== "string") return null;
-  const seconds = Number.parseFloat(raw.replace("s", ""));
-  return Number.isFinite(seconds) ? Math.ceil(seconds * 1000) + 250 : null; // small buffer
-}
-
-function exponentialBackoffMs(attempt: number): number {
-  return Math.min(1000 * 2 ** attempt, MAX_BACKOFF_MS);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function buildSystemPrompt(config: SanitizedRepoConfig, filename: string): string {

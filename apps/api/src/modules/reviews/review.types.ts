@@ -247,10 +247,14 @@ export interface IGeminiService {
   summarizePR(prTitle: string, issues: Array<GeminiIssue & { file: string }>): Promise<string>;
 }
 
-// Narrow slice of `@google/generative-ai`'s GenerativeModel actually used —
-// GeminiService depends on this interface rather than the concrete SDK class so unit tests
-// mock a plain object instead of the SDK (same pattern as IGithubApiClient).
-export interface IGeminiClient {
+// Provider-agnostic single-call LLM seam (renamed from IGeminiClient 2026-09-06 — decisions/008
+// — once GeminiService started depending on more than just Gemini). Shape is still the narrow
+// slice of `@google/generative-ai`'s GenerativeModel that GeminiService actually calls; every
+// adapter (lib/gemini.ts's GeminiClient, lib/openrouter.ts's OpenRouterClient) translates its
+// own provider's request/response into this shape, and lib/llm-client.ts composes adapters
+// behind it (retry decorator, multi-model fallback chain) so GeminiService/IGeminiService never
+// know more than one model — or provider — exists.
+export interface ILLMClient {
   generateContent(request: {
     systemInstruction?: string;
     contents: Array<{ role: string; parts: Array<{ text: string }> }>;
