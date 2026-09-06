@@ -37,7 +37,7 @@ export interface WebhookResult {
 // "GET /billing/seats" / "GET /billing/invoices", backing the Billing screen
 // (knowledge/screens/billing-screens.md) rewritten against the Claude Design mockup.
 export interface SubscriptionResult {
-  planTier: Exclude<PlanTier, "FREE">;
+  planTier: PlanTier;
   seatCount: number;
   nextInvoice: { date: string; amount: number } | null;
   paymentMethod: { brand: string; last4: string } | null;

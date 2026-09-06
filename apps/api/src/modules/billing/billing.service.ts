@@ -146,7 +146,7 @@ export class BillingService implements IBillingService {
       throw new BadRequestError("No active subscription found");
     }
     if (!installation.stripeSubId || installation.planTier === "FREE") {
-      throw new BadRequestError("No active subscription found");
+      return { planTier: "FREE", seatCount: installation.seatCount, nextInvoice: null, paymentMethod: null };
     }
 
     const [upcoming, paymentMethods] = await Promise.all([
@@ -167,7 +167,7 @@ export class BillingService implements IBillingService {
     const card = paymentMethods.data[0]?.card ?? null;
 
     return {
-      planTier: installation.planTier as Exclude<PlanTier, "FREE">,
+      planTier: installation.planTier,
       seatCount: installation.seatCount,
       nextInvoice:
         upcoming && upcoming.next_payment_attempt

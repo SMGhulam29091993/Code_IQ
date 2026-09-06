@@ -156,12 +156,19 @@ describe("BillingService", () => {
       expect(result.paymentMethod).toEqual({ brand: "visa", last4: "4242" });
     });
 
-    it("throws BadRequestError when installation has no stripeSubId", async () => {
+    it("returns planTier: FREE with null fields when installation has no stripeSubId", async () => {
       vi.mocked(installationRepo.findByUserId).mockResolvedValue(
-        buildInstallation({ planTier: "FREE", stripeSubId: null })
+        buildInstallation({ planTier: "FREE", stripeSubId: null, seatCount: 0 })
       );
 
-      await expect(service.getSubscription("user-1")).rejects.toThrow(BadRequestError);
+      const result = await service.getSubscription("user-1");
+
+      expect(result).toEqual({
+        planTier: "FREE",
+        seatCount: 0,
+        nextInvoice: null,
+        paymentMethod: null,
+      });
     });
 
     it("throws BadRequestError when user has no installation", async () => {

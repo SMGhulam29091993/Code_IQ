@@ -1,6 +1,27 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-09-06 (Fix: GET /billing/subscription returns 200 FREE instead of 400)
+- `codeiq29091993 Bot`'s automated review flagged (Warning/Logic) that `GET /billing/subscription`
+  returned 400 `"No active subscription found"` for a valid FREE-tier installation — semantically
+  wrong for a GET against an existing resource in a known state. Fixed: `BillingService
+  .getSubscription` now returns 200 with `{ planTier: 'FREE', seatCount, nextInvoice: null,
+  paymentMethod: null }` instead of throwing when the installation has no `stripeSubId`. The "no
+  installation at all for this user" case is unchanged (still throws `BadRequestError`, matching
+  existing behaviour — not part of this finding).
+- `SubscriptionResult.planTier`/`@codeiq/types` `Subscription.planTier` widened from
+  `Exclude<PlanTier, "FREE">` to `PlanTier`. Frontend: `useBilling.ts`'s `useSubscription` no
+  longer needs `retry: false`-as-error-suppression framing (comment updated); `BillingContent`'s
+  `subscribed` flag now derives from `subscription.planTier !== "FREE"` instead of `!!subscription
+  && !error` (the empty state used to render off a caught fetch error, now off the actual field).
+  Updated the corresponding unit test (`billing.service.test.ts`), integration test
+  (`billing.routes.test.ts`), and frontend test (`BillingContent.test.tsx`, mocks a 200 FREE
+  payload instead of a 400) to match. `pnpm --filter @codeiq/api test` (348/348) and
+  `pnpm --filter @codeiq/web test` (96/96) pass; both apps typecheck and lint clean.
+  `knowledge/domains/billing.md` (`GET /billing/subscription` acceptance criteria/response
+  shape/edge cases/test list) and `knowledge/screens/billing-screens.md` (empty-state trigger
+  condition + test description) updated to match.
+
 ## 2026-08-30 (Security fix: change-password now revokes all refresh tokens)
 - `codeiq29091993 Bot`'s automated PR review flagged (Critical/Security) that
   `POST /auth/change-password` left every existing refresh token/session alive after a password

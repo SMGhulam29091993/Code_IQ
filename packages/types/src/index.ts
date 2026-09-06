@@ -159,7 +159,7 @@ export interface PlanInfo {
 
 // Matches apps/api/src/modules/billing/billing.types.ts SubscriptionResult.
 export interface Subscription {
-  planTier: Exclude<PlanTier, "FREE">;
+  planTier: PlanTier;
   seatCount: number;
   nextInvoice: { date: string; amount: number } | null;
   paymentMethod: { brand: string; last4: string } | null;

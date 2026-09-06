@@ -116,9 +116,11 @@ card highlighting + next-invoice card.
 - [ ] Scoped to the current user's installation (`InstallationRepository.findByUserId`, same
   "one active installation per user" stance as `createCheckout`/`createPortal` — see
   Implementation notes below)
-- [ ] Returns 400 when the installation has no `stripeSubId` (FREE tier / never subscribed) —
-  this is what drives the Billing screen's "No subscription yet" empty state, not a 200 with
-  null fields
+- [ ] Returns 200 with `planTier: 'FREE'` and null `nextInvoice`/`paymentMethod` when the
+  installation has no `stripeSubId` (FREE tier / never subscribed) — this is what drives the
+  Billing screen's "No subscription yet" empty state. A GET against a valid (if unsubscribed)
+  installation is not an error, so this is not a 400 (flagged as a Warning finding by
+  `codeiq29091993 Bot`'s own review — 2026-09-06).
 - [ ] `nextInvoice` fields come from `stripe.invoices.retrieveUpcoming` (or equivalent), not
   computed client-side
 - [ ] Never exposes the full Stripe customer/subscription object — only the fields below
@@ -127,10 +129,10 @@ card highlighting + next-invoice card.
 ```typescript
 {
   data: {
-    planTier: 'PRO' | 'TEAM';
+    planTier: 'FREE' | 'PRO' | 'TEAM';
     seatCount: number;
-    nextInvoice: { date: string; amount: number } | null;  // null if subscription is canceling
-    paymentMethod: { brand: string; last4: string } | null;
+    nextInvoice: { date: string; amount: number } | null;  // null if FREE, or subscription is canceling
+    paymentMethod: { brand: string; last4: string } | null;  // null if FREE
   }
 }
 ```
@@ -138,7 +140,7 @@ card highlighting + next-invoice card.
 **Edge cases:**
 | Case | Expected behaviour | Status |
 |------|--------------------|-|
-| Installation has no `stripeSubId` (FREE) | 400 `"No active subscription found"` | |
+| Installation has no `stripeSubId` (FREE) | 200, `planTier: 'FREE'`, `nextInvoice`/`paymentMethod` null | |
 | No installation for user | 404 `"Installation not found"` | |
 | Stripe API unavailable | 502 | |
 | Subscription set to cancel at period end | `nextInvoice: null`, `planTier` still reflects current (unchanged) tier | |
@@ -147,7 +149,7 @@ card highlighting + next-invoice card.
 ```typescript
 describe('BillingService.getSubscription', () => {
   it('returns plan tier, seat count, next invoice and payment method for a subscribed installation')
-  it('throws BadRequestError when installation has no stripeSubId')
+  it('returns planTier: FREE with null fields when installation has no stripeSubId')
   it('throws NotFoundError when user has no installation')
   it('returns nextInvoice: null when subscription is set to cancel at period end')
 })

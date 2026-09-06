@@ -230,7 +230,7 @@ describe("Billing routes", () => {
       expect(res.status).toBe(401);
     });
 
-    it("returns 400 when installation has no active subscription", async () => {
+    it("returns 200 with planTier: FREE and null fields when installation has no active subscription", async () => {
       mockPrisma().user.findUnique.mockResolvedValueOnce(buildUser());
       mockPrisma().installation.findFirst.mockResolvedValueOnce(buildInstallation());
 
@@ -238,8 +238,13 @@ describe("Billing routes", () => {
         .get("/api/billing/subscription")
         .set("Authorization", `Bearer ${accessTokenFor("user-1")}`);
 
-      expect(res.status).toBe(400);
-      expect(res.body.message).toBe("No active subscription found");
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual({
+        planTier: "FREE",
+        seatCount: 0,
+        nextInvoice: null,
+        paymentMethod: null,
+      });
     });
 
     it("returns 200 with plan/seat/invoice/payment info for a subscribed installation", async () => {

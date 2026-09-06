@@ -16,11 +16,11 @@ export const BillingContent: FC = () => {
   const showSuccess = searchParams.get("success") === "true";
   const crumb = useAccountLogin();
 
-  const { data: subscription, error } = useSubscription();
+  const { data: subscription } = useSubscription();
   const { data: installations } = useInstallations();
   const portalMutation = useBillingPortal();
   const isOrg = installations?.[0]?.accountType === "Organization";
-  const subscribed = !!subscription && !error;
+  const subscribed = !!subscription && subscription.planTier !== "FREE";
 
   return (
     <div>

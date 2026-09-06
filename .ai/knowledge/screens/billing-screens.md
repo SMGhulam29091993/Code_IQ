@@ -78,7 +78,7 @@ BillingPage:
 ### Edge cases
 | Case | Behaviour |
 |------|-----------|
-| On Free tier (no subscription) | `GET /billing/subscription` returns 400 → page shows the mockup's own empty state: "No subscription yet" / *"`{accountLogin}` is on the free tier. Add a card to move to Pro or Team and unlock private repositories."* / CTA "Choose a plan" (scrolls to PlanCards) |
+| On Free tier (no subscription) | `GET /billing/subscription` returns 200 with `planTier: 'FREE'` → page shows the mockup's own empty state: "No subscription yet" / *"`{accountLogin}` is on the free tier. Add a card to move to Pro or Team and unlock private repositories."* / CTA "Choose a plan" (scrolls to PlanCards) |
 | `POST /billing/checkout` returns 400 (already subscribed) | Toast: "You already have an active subscription. Use 'Manage' to change your plan." |
 | `POST /billing/portal` returns 400 (no subscription) | Toast: "No active subscription found." |
 | Stripe checkout returns `?success=true` | Green success banner |
@@ -92,7 +92,7 @@ describe('BillingPage', () => {
   it('renders 3 plan cards with data from GET /billing/plans')
   it('highlights the current plan card from GET /billing/subscription')
   it('shows success banner when ?success=true in URL')
-  it('shows the free-tier empty state when GET /billing/subscription returns 400')
+  it('shows the free-tier empty state when GET /billing/subscription returns planTier: FREE')
   it('each section (plans/seats/invoice/invoices) fails and recovers independently')
 })
 

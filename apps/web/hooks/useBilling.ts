@@ -11,13 +11,12 @@ export const useBillingPlans = () =>
     queryFn: () => api.get<{ data: { plans: PlanInfo[] } }>("/billing/plans").then((r) => r.data.data.plans),
   });
 
-// 400 ("No active subscription found") is the expected FREE-tier response, not a real error —
-// callers check `error` and render the empty state rather than an ErrorBanner for a 400 here.
+// Always 200 — FREE tier comes back as `{ planTier: "FREE", nextInvoice: null, ... }` rather
+// than an error, since a GET for a valid (if unsubscribed) installation isn't a failure.
 export const useSubscription = () =>
   useQuery({
     queryKey: queryKeys.billingSubscription,
     queryFn: () => api.get<{ data: Subscription }>("/billing/subscription").then((r) => r.data.data),
-    retry: false,
   });
 
 export const useBillingSeats = () =>

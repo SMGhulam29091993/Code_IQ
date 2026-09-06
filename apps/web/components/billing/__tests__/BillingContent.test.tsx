@@ -49,13 +49,14 @@ describe("BillingContent", () => {
     expect(await screen.findByText(/you're all set/i)).toBeInTheDocument();
   });
 
-  it("shows the free-tier empty state when GET /billing/subscription returns 400", async () => {
+  it("shows the free-tier empty state when GET /billing/subscription returns planTier: FREE", async () => {
     server.use(
       http.get("/api/billing/subscription", () =>
-        HttpResponse.json(
-          { success: false, message: "No active subscription found", data: null },
-          { status: 400 }
-        )
+        HttpResponse.json({
+          success: true,
+          message: "Success",
+          data: { planTier: "FREE", seatCount: 0, nextInvoice: null, paymentMethod: null },
+        })
       )
     );
 

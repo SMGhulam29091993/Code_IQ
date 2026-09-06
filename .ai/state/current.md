@@ -1,6 +1,13 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
+## 2026-09-06 side fix (unrelated to the active task below)
+`GET /billing/subscription` now returns 200 `planTier: 'FREE'` (with null `nextInvoice`/
+`paymentMethod`) instead of 400 for an unsubscribed installation — closed a Warning/Logic
+finding from `codeiq29091993 Bot`'s automated review. See `state/completed.md`'s 2026-09-06
+entry and `knowledge/domains/billing.md`/`knowledge/screens/billing-screens.md` for the detail.
+Does not touch the frontend Step 3–9 / backend Step 7–8 work described below.
+
 ## 2026-08-30 side fix (unrelated to the active task below)
 `POST /auth/change-password` now revokes all of a user's other refresh tokens/sessions —
 closed a Critical/Security finding from `codeiq29091993 Bot`'s automated PR review. See
