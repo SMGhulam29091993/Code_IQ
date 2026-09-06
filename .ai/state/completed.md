@@ -1,6 +1,21 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-09-06 (Fix: Account tabs use router.replace, not push)
+- `codeiq29091993 Bot`'s automated review flagged (Warning/Logic) that `AccountTabs.tsx`'s tab
+  switcher used `router.push`, adding a distinct browser-history entry per tab click on what's
+  a single page — back button would step through Profile/Workspace instead of leaving the page.
+  Fixed: `router.push` → `router.replace` in `AccountTabs.tsx`'s tab `onClick`. `DangerZone.tsx`'s
+  `router.push("/onboarding")` (a real navigation away from the page after removing the
+  installation) is untouched — different case, not part of this finding.
+  `RepoDetailTabs.tsx` has the identical `router.push` pattern for its own tab switcher but
+  wasn't flagged (this finding was anchored to `account-screens.md`) — left as-is, worth the
+  same fix if/when that gets reviewed.
+- `AccountTabs.test.tsx`'s `useRouter` mock extended with a `replace` spy; the tab-switch test's
+  assertion moved from `push` to `replace`. `knowledge/screens/account-screens.md`'s pseudocode
+  and tabs-shell acceptance criteria updated to match. `pnpm --filter @codeiq/web test` (96/96)
+  passes; typecheck/lint clean.
+
 ## 2026-09-06 (Fix: GET /billing/invoices returns 200 { invoices: [] } instead of 400)
 - Same class of finding as this session's `GET /billing/subscription` fix, flagged separately by
   `codeiq29091993 Bot`'s own review (Warning/Logic): `GET /billing/invoices` threw 400 `"No

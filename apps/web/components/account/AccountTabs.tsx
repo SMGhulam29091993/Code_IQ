@@ -39,7 +39,7 @@ export const AccountTabs: FC = () => {
           <button
             key={tab.id}
             type="button"
-            onClick={() => router.push(`/account?tab=${tab.id}`)}
+            onClick={() => router.replace(`/account?tab=${tab.id}`)}
             className={cn(
               "border-b-2 pb-3 text-sm font-medium",
               activeTab === tab.id

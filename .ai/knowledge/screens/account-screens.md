@@ -32,7 +32,10 @@ Header: breadcrumb "account", title "Account", no header CTA.
 
 ### Acceptance criteria — tabs shell
 - [ ] 2 tabs: Profile / Workspace. Default: Profile
-- [ ] Tab selection reflected in URL (`?tab=workspace`), same convention as Repo Detail
+- [ ] Tab selection reflected in URL (`?tab=workspace`), same convention as Repo Detail — uses
+  `router.replace`, not `push`, so switching tabs doesn't clutter browser history with a back-
+  button entry per tab (flagged as a Warning finding by `codeiq29091993 Bot`'s own review —
+  2026-09-06)
 
 ### Acceptance criteria — Profile tab (`ProfileForm` + `ChangePasswordForm`)
 - [ ] Loads current user via `GET /auth/me`
@@ -69,7 +72,7 @@ AccountPage:
   tab = searchParams.get('tab') ?? 'profile'
 
   render:
-    <AccountTabs active={tab} onChange={t => router.push(`?tab=${t}`)} />
+    <AccountTabs active={tab} onChange={t => router.replace(`?tab=${t}`)} />
     {tab === 'profile' && <ProfileTab />}
     {tab === 'workspace' && <WorkspaceTab />}
 

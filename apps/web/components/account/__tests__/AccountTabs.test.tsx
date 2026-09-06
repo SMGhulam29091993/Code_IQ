@@ -22,10 +22,12 @@ function renderWithProviders(ui: ReactElement) {
 
 describe("AccountTabs", () => {
   const push = vi.fn();
+  const replace = vi.fn();
 
   beforeEach(() => {
     push.mockClear();
-    (useRouter as unknown as ReturnType<typeof vi.fn>).mockReturnValue({ push });
+    replace.mockClear();
+    (useRouter as unknown as ReturnType<typeof vi.fn>).mockReturnValue({ push, replace });
     (useSearchParams as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
       new URLSearchParams()
     );
@@ -44,7 +46,7 @@ describe("AccountTabs", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Workspace" }));
 
-    expect(push).toHaveBeenCalledWith("/account?tab=workspace");
+    expect(replace).toHaveBeenCalledWith("/account?tab=workspace");
   });
 
   it("renders ChangePasswordForm for a password account (githubId null)", async () => {
