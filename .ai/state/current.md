@@ -7,8 +7,8 @@ branch (cut from `feat/auth-screens` at commit `cc9d084`, since the fix touches 
 the jobId fix already changed): `Review.coordinatorJobId` (new column + migration) lets
 `review-coordinator.job.ts` recognize a BullMQ retry of the same job and reuse the existing
 `Review`/`ReviewChunk` rows instead of creating duplicates. 3 new tests, 366/366 passing,
-typecheck/lint/build all clean. Full detail in `state/completed.md`. **Not yet committed or
-merged** — see "Working branch" below.
+typecheck/lint/build all clean. Full detail in `state/completed.md`. Committed (`60bb1d9`) on
+that branch; **not yet merged into `feat/auth-screens`/`Dev`** — see "Working branch" below.
 
 ## 2026-09-06 (Critical fix: Step 8 pipeline was completely broken for real reviews)
 Rebuilt the 11-day-stale containers (user's explicit go-ahead, reversing the earlier "not yet")
@@ -164,4 +164,4 @@ won't be kept exhaustively current. The one exception: the review-coordinator id
 (this file's top entry) is on a **new** branch, `fix/review-coordinator-idempotency`, cut off
 `feat/auth-screens` at `cc9d084` — per explicit user instruction to use a fresh branch for that
 piece of work, following the `fix/*` convention `memory/pitfalls.md` documents for new branches.
-Not yet committed there as of this note.
+Committed there as `60bb1d9`; not yet merged anywhere.
