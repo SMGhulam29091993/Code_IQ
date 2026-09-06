@@ -2,6 +2,10 @@ import { prisma } from "@codeiq/db";
 import type { IRepoRepository, ListReposFilters } from "./repo.types";
 
 export class RepoRepository implements IRepoRepository {
+  // `reviews: { take: 1, orderBy: createdAt desc }` gets the most recent review's timestamp
+  // alongside the count in one query — .ai/knowledge/screens/dashboard-screens.md "Screen:
+  // Repos List" shows a "last review" column the mockup has and the original response shape
+  // didn't (added 2026-08-23).
   findManyForUser(userId: string, filters: ListReposFilters) {
     return prisma.repo
       .findMany({
@@ -10,18 +14,33 @@ export class RepoRepository implements IRepoRepository {
           ...(filters.installationId ? { installationId: filters.installationId } : {}),
           ...(filters.isActive !== undefined ? { isActive: filters.isActive } : {}),
         },
-        include: { config: true, _count: { select: { reviews: true } } },
+        include: {
+          config: true,
+          _count: { select: { reviews: true } },
+          reviews: { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true } },
+        },
       })
       .then((rows) =>
-        rows.map(({ _count, ...repo }) => ({ ...repo, reviewCount: _count.reviews }))
+        rows.map(({ _count, reviews, ...repo }) => ({
+          ...repo,
+          reviewCount: _count.reviews,
+          lastReviewAt: reviews[0]?.createdAt ?? null,
+        }))
       );
   }
 
-  findByIdForUser(repoId: string) {
-    return prisma.repo.findUnique({
+  async findByIdForUser(repoId: string) {
+    const repo = await prisma.repo.findUnique({
       where: { id: repoId },
-      include: { config: true, installation: { select: { userId: true, planTier: true } } },
+      include: {
+        config: true,
+        installation: { select: { userId: true, planTier: true } },
+        reviews: { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true } },
+      },
     });
+    if (!repo) return null;
+    const { reviews, ...rest } = repo;
+    return { ...rest, lastReviewAt: reviews[0]?.createdAt ?? null };
   }
 
   async setActive(repoId: string, isActive: boolean) {

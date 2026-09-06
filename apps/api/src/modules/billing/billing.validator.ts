@@ -8,3 +8,10 @@ export const CheckoutSchema = z.object({
   planTier: z.enum(["FREE", "PRO", "TEAM"]),
   seats: z.number().int(),
 });
+
+// GET /billing/invoices query params — .ai/knowledge/domains/billing.md "GET /billing/invoices".
+// The clamp to MAX_INVOICES_LIMIT (50) happens in BillingService.getInvoices, not here — this
+// schema only coerces the query string to a number.
+export const GetInvoicesQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().optional(),
+});

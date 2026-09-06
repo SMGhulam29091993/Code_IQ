@@ -90,33 +90,62 @@ model RepoConfig {
 }
 
 model Review {
-  id             String        @id @default(cuid())
-  repoId         String
-  repo           Repo          @relation(fields: [repoId], references: [id])
-  prNumber       Int
-  prTitle        String
-  prAuthor       String
-  headSha        String
-  status         ReviewStatus  @default(PENDING)
-  summary        String?
-  filesReviewed  Int           @default(0)
-  githubReviewId Int?
-  issues         ReviewIssue[]
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  id              String        @id @default(cuid())
+  repoId          String
+  repo            Repo          @relation(fields: [repoId], references: [id])
+  prNumber        Int
+  prTitle         String
+  prAuthor        String
+  headSha         String
+  status          ReviewStatus  @default(PENDING)
+  summary         String?
+  filesReviewed   Int           @default(0)
+  githubReviewId  Int?
+  totalChunks     Int           @default(0)
+  completedChunks Int           @default(0) // denormalized live-progress counter, UI-only — the
+  // finalize job re-queries ReviewChunk rows directly for the DONE/FAILED gating decision, never
+  // trusts this. See knowledge/technical/backend/review-pipeline-scaling.md.
+  truncated       Boolean       @default(false)
+  issues          ReviewIssue[]
+  chunks          ReviewChunk[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 }
 
 model ReviewIssue {
-  id         String   @id @default(cuid())
+  id         String       @id @default(cuid())
   reviewId   String
-  review     Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  review     Review       @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  chunkId    String?
+  chunk      ReviewChunk? @relation(fields: [chunkId], references: [id], onDelete: SetNull)
   file       String
   line       Int
   severity   String // critical | warning | info
   category   String // bug | security | style | performance | logic
   message    String
   suggestion String
-  createdAt  DateTime @default(now())
+  createdAt  DateTime     @default(now())
+}
+
+// Added in decisions/007 (chunk-level fan-out) Phase 1 — schema only, not yet read/written by
+// any code path. See knowledge/technical/backend/review-pipeline-scaling.md.
+model ReviewChunk {
+  id          String        @id @default(cuid())
+  reviewId    String
+  review      Review        @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  filename    String
+  chunkIndex  Int
+  patch       String        @db.Text
+  status      ChunkStatus   @default(PENDING)
+  attempts    Int           @default(0)
+  error       String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime      @default(now())
+  issues      ReviewIssue[]
+
+  @@unique([reviewId, filename, chunkIndex])
+  @@index([reviewId, status])
 }
 
 model ProcessedStripeEvent {
@@ -140,4 +169,11 @@ enum PlanTier {
   FREE
   PRO
   TEAM
+}
+
+enum ChunkStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
 }

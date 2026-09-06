@@ -90,12 +90,14 @@ describe("GithubService", () => {
       lockEmail: vi.fn(),
       findByGithubId: vi.fn(),
       linkGithubIdentity: vi.fn(),
+      update: vi.fn(),
     };
     githubApiClient = {
       getInstallation: vi.fn(),
       exchangeOAuthCode: vi.fn(),
       getAuthenticatedUser: vi.fn(),
       listInstallationRepos: vi.fn(),
+      listOrgMembers: vi.fn(),
     };
     vi.mocked(githubApiClient.listInstallationRepos).mockResolvedValue([]);
 

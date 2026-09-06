@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { axe } from "jest-axe";
 import { HttpResponse, http } from "msw";
 import { useRouter } from "next/navigation";
 import { type ReactElement } from "react";
@@ -239,5 +240,11 @@ describe("LoginForm", () => {
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
 
     await waitFor(() => expect(screen.getByRole("button", { name: /signing in/i })).toBeDisabled());
+  });
+
+  it("has no accessibility violations", async () => {
+    const { container } = renderWithProviders(<LoginForm />);
+
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

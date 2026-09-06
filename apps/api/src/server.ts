@@ -4,8 +4,8 @@
 import "dotenv/config";
 
 import { app } from "./app";
-import { reviewJobProcessor } from "./container";
-import { startReviewWorker } from "./jobs/worker";
+import { reviewChunkJobProcessor, reviewCoordinatorJobProcessor, reviewFinalizeJobProcessor } from "./container";
+import { startReviewWorkers } from "./jobs/worker";
 import { env } from "./lib/env";
 import { prisma } from "./lib/prisma";
 import { redis } from "./lib/redis";
@@ -17,7 +17,7 @@ async function main() {
   await prisma.$connect();
   await redis.ping();
 
-  startReviewWorker(reviewJobProcessor);
+  startReviewWorkers(reviewCoordinatorJobProcessor, reviewChunkJobProcessor, reviewFinalizeJobProcessor);
 
   app.listen(env.PORT, () => {
     console.log(`API listening on port ${env.PORT}`);

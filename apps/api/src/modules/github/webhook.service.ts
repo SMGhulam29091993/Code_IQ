@@ -6,7 +6,7 @@ import type {
   IWebhookService,
   WebhookEventInput,
 } from "./github.types";
-import { reviewQueue } from "../../jobs/queue";
+import { reviewCoordinatorQueue } from "../../jobs/queue";
 import { AppError } from "../../lib/errors";
 
 const PULL_REQUEST_ACTIONS = ["opened", "synchronize", "reopened"];
@@ -89,7 +89,7 @@ export class WebhookService implements IWebhookService {
     try {
       // Await only the enqueue (fast — pushes to Redis), never the job's own processing.
       // See .ai/rules/backend.md #6.
-      await reviewQueue.add(
+      await reviewCoordinatorQueue.add(
         "review-pr",
         {
           installationId: installation.id,

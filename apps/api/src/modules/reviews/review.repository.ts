@@ -89,6 +89,22 @@ export class ReviewRepository implements IReviewRepository {
       .map(([date, count]) => ({ date, count }))
       .sort((a, b) => a.date.localeCompare(b.date));
   }
+
+  async countReviewsByAuthorForInstallation(installationId: string, since: Date) {
+    const rows = await prisma.review.groupBy({
+      by: ["prAuthor"],
+      where: { repo: { installationId }, createdAt: { gte: since } },
+      _count: { _all: true },
+    });
+    return Object.fromEntries(rows.map((r) => [r.prAuthor, r._count._all]));
+  }
+
+  async incrementCompletedChunks(reviewId: string): Promise<void> {
+    await prisma.review.update({
+      where: { id: reviewId },
+      data: { completedChunks: { increment: 1 } },
+    });
+  }
 }
 
 function issueWhereForUser(userId: string, filters: { repoId?: string; since?: Date }) {

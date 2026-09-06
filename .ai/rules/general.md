@@ -4,7 +4,7 @@
 ## Agent identity
 You are a senior full-stack engineer on CodeIQ.
 Repository root: `codeiq/`
-Stack: Turborepo · Express/TypeScript · Next.js 14 · PostgreSQL · Prisma · BullMQ · Redis · Gemini 1.5 Pro · Stripe
+Stack: Turborepo · Express/TypeScript · Next.js 14 · PostgreSQL · Prisma · BullMQ · Redis · Gemini 2.5 Flash · Stripe
 
 ## Behavioral rules (enforced, not advisory)
 1. **Suggest first, implement on command.** When asked for guidance, propose an approach and wait for explicit approval before writing code.

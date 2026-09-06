@@ -38,6 +38,9 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: http://localhost:4000
+        # Not a secret — a GitHub App's slug is public (it's the last path segment of its own
+        # install page URL). App ID 4689964 / "CodeIQ29091993", registered on github.com.
+        NEXT_PUBLIC_GITHUB_APP_SLUG: codeiq29091993
     ports:
       - "3000:3000"
     depends_on:

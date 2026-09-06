@@ -42,3 +42,30 @@ key-naming convention as the existing `otp:` and `oauth_state:` keys
 
 **Applies to:** backend (`apps/api/src/modules/auth/refresh-token.repository.ts`,
 `packages/db/prisma/schema.prisma`)
+
+## Addendum (2026-08-30): `deleteAllForUser` breaks the "always an exact key" pattern
+
+`POST /auth/change-password` needed to revoke every refresh token belonging to a user (a
+security-review finding — password change previously left old sessions/devices logged in
+indefinitely). The negative consequence flagged above ("no synthetic row id... not a drop-in
+swap for a hypothetical future caller that wanted a real row identity") undersold the real gap:
+this store has no reverse index from `userId` to their tokens at all, only token → `userId`.
+
+**Decision:** rather than adding a second Redis structure (e.g. a per-user Set of token keys) to
+get an O(1) reverse lookup, `deleteAllForUser` does a cursor-based `SCAN … MATCH
+refresh_token:* COUNT 100` + `MGET` + filter-by-value + `DEL`. A per-user Set was considered and
+rejected: it would reintroduce exactly the manual-cleanup problem this ADR moved off Postgres to
+avoid — tokens that expire naturally (TTL, never explicitly logged out) would leave dead entries
+in the set forever, since nothing removes a Set member when its paired key's TTL fires.
+
+**Consequences:**
+- `SCAN` (not `KEYS`) so this never blocks the single-threaded Redis event loop, even as the
+  refresh-token keyspace grows — cost is O(total live refresh tokens across all users), paid
+  once per password change, not O(this user's tokens).
+- This is now the only place in the codebase that enumerates Redis keys by pattern; every other
+  lookup (`otp:`, `oauth_state:`, `refresh_token:` elsewhere in this file) is an exact-key
+  `GET`/`SET`/`DEL`. Revisit with a proper reverse index (Set or Hash, accepting the cleanup
+  trade-off, or moving expiry-aware cleanup into a scheduled job) if refresh-token volume ever
+  makes a full-keyspace `SCAN` per password change too slow.
+- Unauthenticated `POST /auth/refresh` and `POST /auth/logout` are unaffected — they already
+  address a single token by exact key.

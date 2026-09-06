@@ -322,3 +322,32 @@ export const getInstallationOctokit = async (githubInstallationId: number) => {
   spec lives in `knowledge/domains/auth.md`) are distinct from `GITHUB_APP_ID` /
   `GITHUB_APP_PRIVATE_KEY` (installation-token auth for repo/PR access, this file). Both pairs
   belong to the same GitHub App registration but are never interchangeable.
+- **A real GitHub App is registered** under `GITHUB_APP_ID=4689964` (name "CodeIQ29091993",
+  **slug `codeiq29091993`** — confirmed 2026-08-25 via `GET /app` with the app's own JWT, since
+  `apps/web/.env`'s `NEXT_PUBLIC_GITHUB_APP_SLUG` had drifted to an unverified placeholder
+  (`codeiq-dev`) that 404s on `github.com/apps/codeiq-dev/installations/new` — the Onboarding
+  screen's "Install the GitHub App" button was silently broken. Fixed in `apps/web/.env`. The
+  slug is not a secret (it's the public last path segment of the app's own install-page URL, same
+  visibility as the app's name), so it's also hardcoded as a docker-compose build arg
+  (`apps/api/docker-compose.yml`) rather than sourced from a gitignored `.env` — see the next
+  note for why that build arg needs to exist at all.
+- **`apps/web/Dockerfile` was missing the `NEXT_PUBLIC_GITHUB_APP_SLUG` build arg entirely** (only
+  `NEXT_PUBLIC_API_URL` was threaded through). Next.js inlines `NEXT_PUBLIC_*` vars into the
+  client bundle at *build* time, not read at runtime — an unset one doesn't error, it just bakes
+  in the literal string `"undefined"`, so the containerized build's install link was
+  `https://github.com/apps/undefined/installations/new` regardless of what `apps/web/.env` said
+  on the host. Fixed by adding the `ARG`/`ENV` pair to the Dockerfile and the build arg to
+  `docker-compose.yml`; needs an image rebuild (`docker compose build web`) to take effect on an
+  already-built container.
+- **Automated drift check** (2026-09-06, per `codeiq29091993 Bot`'s own review of the slug-drift
+  incident above — "implement automated validation... to prevent drift"): `apps/api/scripts/
+  verify-github-app-slug.ts` re-fetches the app's real slug via `GET /app` and diffs it against
+  `docker-compose.yml`'s checked-in `NEXT_PUBLIC_GITHUB_APP_SLUG`, run via `pnpm --filter
+  @codeiq/api run verify:github-app-slug`. Wired into `.github/workflows/verify-github-app-
+  slug.yml` — runs on push/PR touching either file, weekly on a schedule, and on manual dispatch.
+  Needs two repo secrets to actually run, **not yet added** (this session had no access to
+  configure them): `APP_GITHUB_ID` and `APP_GITHUB_PRIVATE_KEY` (same base64-PEM encoding as
+  `apps/api/.env`'s `GITHUB_APP_PRIVATE_KEY`) — named with that prefix, not `GITHUB_*`, because
+  GitHub Actions rejects secret names starting with the reserved `GITHUB_` prefix. Verified
+  locally against the real GitHub API (both the match and the missing-credentials-error paths),
+  not yet verified running inside Actions itself.

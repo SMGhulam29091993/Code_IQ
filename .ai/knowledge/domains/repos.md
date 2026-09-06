@@ -24,6 +24,10 @@ Per-repo config (`RepoConfig`) controls AI behaviour for that repo.
 - [ ] Supports filtering by installationId and isActive
 - [ ] Includes review count per repo
 - [ ] Includes active config summary per repo
+- [ ] Includes `lastReviewAt` per repo (most recent review's `createdAt`, `null` if never
+  reviewed) — added 2026-08-23 for the Repos List screen's "Last review" column
+  (`knowledge/screens/dashboard-screens.md`); fetched via `reviews: { orderBy: createdAt desc,
+  take: 1 }` alongside the existing `_count` in the same query, not a second round trip
 
 **Edge cases:**
 | Case | Expected behaviour | Status |
@@ -41,6 +45,34 @@ describe('RepoService.listRepos', () => {
   it('throws ForbiddenError when installationId belongs to another user')
   it('returns empty array when user has no repos')
   it('includes review count per repo')
+})
+```
+
+---
+
+### GET /repos/:repoId
+**Purpose:** Fetch a single repo — needed now that Repo Detail (`knowledge/screens/
+dashboard-screens.md`) is one tabbed page rather than a list-filter. New 2026-08-23, source: the
+Claude Design mockup's `repoDetail` screen.
+**Auth:** JWT
+
+**Acceptance criteria:**
+- [ ] Verifies repo belongs to current user's installation (same ownership pattern as
+  `POST /repos/:repoId/activate`)
+- [ ] Returns the same repo shape as a row from `GET /repos` (including review count)
+
+**Edge cases:**
+| Case | Expected behaviour | Status |
+|------|--------------------|-|
+| repoId not found | 404 `"Repo not found"` | |
+| repoId belongs to another user | 403 `"Forbidden"` | |
+
+**Unit test cases:**
+```typescript
+describe('RepoService.getRepo', () => {
+  it('returns the repo for an authorized user')
+  it('throws NotFoundError for unknown repoId')
+  it('throws ForbiddenError when repo belongs to another user')
 })
 ```
 

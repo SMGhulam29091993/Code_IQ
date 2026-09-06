@@ -11,6 +11,7 @@ import type { AuthTokensResult } from "@codeiq/types";
 import { Button } from "@/components/ui/Button";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Input } from "@/components/ui/Input";
+import { Logo } from "@/components/ui/Logo";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/auth.store";
 
@@ -57,7 +58,8 @@ export const LoginForm: FC = () => {
 
   return (
     <div className="w-full max-w-sm rounded-card border border-border bg-surface p-8">
-      <h1 className="mb-6 text-xl font-semibold text-text">Sign in</h1>
+      <Logo className="mb-8" />
+      <h1 className="mb-6 font-display text-xl font-semibold text-text">Sign in</h1>
       <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">
         <div>
           <label htmlFor="email" className="mb-1 block text-sm font-medium text-text2">

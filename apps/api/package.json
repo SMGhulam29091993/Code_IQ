@@ -8,7 +8,8 @@
     "start": "node dist/server.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "verify:github-app-slug": "tsx scripts/verify-github-app-slug.ts"
   },
   "dependencies": {
     "@codeiq/db": "workspace:*",

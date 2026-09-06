@@ -59,6 +59,44 @@ describe("DiffService.filterFiles", () => {
   });
 });
 
+describe("DiffService.prioritizeFiles", () => {
+  const service = new DiffService();
+
+  it("sorts files by additions+deletions descending", () => {
+    const files = [
+      buildFile({ filename: "small.ts", additions: 1, deletions: 0 }),
+      buildFile({ filename: "big.ts", additions: 50, deletions: 20 }),
+      buildFile({ filename: "medium.ts", additions: 5, deletions: 5 }),
+    ];
+
+    const result = service.prioritizeFiles(files);
+
+    expect(result.map((f) => f.filename)).toEqual(["big.ts", "medium.ts", "small.ts"]);
+  });
+
+  it("treats files with no additions/deletions info as size 0", () => {
+    const files = [
+      buildFile({ filename: "unknown-size.ts" }),
+      buildFile({ filename: "big.ts", additions: 10, deletions: 0 }),
+    ];
+
+    const result = service.prioritizeFiles(files);
+
+    expect(result.map((f) => f.filename)).toEqual(["big.ts", "unknown-size.ts"]);
+  });
+
+  it("does not mutate the input array", () => {
+    const files = [
+      buildFile({ filename: "a.ts", additions: 1 }),
+      buildFile({ filename: "b.ts", additions: 10 }),
+    ];
+
+    service.prioritizeFiles(files);
+
+    expect(files.map((f) => f.filename)).toEqual(["a.ts", "b.ts"]);
+  });
+});
+
 describe("DiffService.chunkFiles", () => {
   const service = new DiffService();
 

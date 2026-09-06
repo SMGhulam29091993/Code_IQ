@@ -1,9 +1,11 @@
 import { Router } from "express";
 import {
+  ChangePasswordSchema,
   LoginSchema,
   LogoutSchema,
   RefreshSchema,
   RegisterSchema,
+  UpdateProfileSchema,
   VerifyOtpSchema,
 } from "./auth.validator";
 import { authController } from "../../container";
@@ -64,3 +66,46 @@ authRoutes.post("/refresh", validate(RefreshSchema), authController.refresh);
  *       - bearerAuth: []
  */
 authRoutes.post("/logout", authMiddleware, validate(LogoutSchema), authController.logout);
+
+/**
+ * @swagger
+ * /auth/me:
+ *   get:
+ *     summary: Get the current user's profile
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ */
+authRoutes.get("/me", authMiddleware, authController.getMe);
+
+/**
+ * @swagger
+ * /auth/me:
+ *   patch:
+ *     summary: Update the current user's display name
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ */
+authRoutes.patch(
+  "/me",
+  authMiddleware,
+  validate(UpdateProfileSchema),
+  authController.updateProfile
+);
+
+/**
+ * @swagger
+ * /auth/change-password:
+ *   post:
+ *     summary: Change the current user's password
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ */
+authRoutes.post(
+  "/change-password",
+  authMiddleware,
+  validate(ChangePasswordSchema),
+  authController.changePassword
+);

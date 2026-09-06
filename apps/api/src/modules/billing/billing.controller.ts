@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import type { CheckoutInput, IBillingService } from "./billing.types";
+import type { CheckoutInput, GetInvoicesInput, IBillingService } from "./billing.types";
 import { ok } from "../../lib/response";
 
 // Thin HTTP handlers only — all business logic lives in BillingService.
@@ -21,6 +21,24 @@ export class BillingController {
 
   createPortal = async (req: Request, res: Response) => {
     const result = await this.billingService.createPortal(req.user!.id);
+    res.status(200).json(ok(result));
+  };
+
+  getSubscription = async (req: Request, res: Response) => {
+    const result = await this.billingService.getSubscription(req.user!.id);
+    res.status(200).json(ok(result));
+  };
+
+  getSeats = async (req: Request, res: Response) => {
+    const result = await this.billingService.getSeats(req.user!.id);
+    res.status(200).json(ok(result));
+  };
+
+  getInvoices = async (req: Request, res: Response) => {
+    const result = await this.billingService.getInvoices(
+      req.user!.id,
+      req.query as unknown as GetInvoicesInput
+    );
     res.status(200).json(ok(result));
   };
 

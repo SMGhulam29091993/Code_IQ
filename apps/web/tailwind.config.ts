@@ -24,9 +24,12 @@ const config: Config = {
         purple: "#A78BFA",
       },
       fontFamily: {
-        display: ["Syne", "sans-serif"],
-        body: ["DM Sans", "sans-serif"],
-        mono: ["DM Mono", "monospace"],
+        // Variables set on <html> by next/font in app/layout.tsx — self-hosted, not a raw
+        // family-name lookup (which would silently fall back to the browser default if the
+        // font was never actually loaded, as happened here before this fix).
+        display: ["var(--font-syne)", "sans-serif"],
+        body: ["var(--font-dm-sans)", "sans-serif"],
+        mono: ["var(--font-dm-mono)", "monospace"],
       },
       borderRadius: {
         card: "12px", // rounded-xl

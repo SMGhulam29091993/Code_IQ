@@ -3,6 +3,8 @@ import jwt from "jsonwebtoken";
 import type { User } from "@codeiq/db";
 import type {
   AuthTokensResult,
+  ChangePasswordInput,
+  GetMeResult,
   IAuthService,
   IOtpRepository,
   IRefreshTokenRepository,
@@ -14,6 +16,8 @@ import type {
   RegisterInput,
   RegisterResult,
   SanitizedUser,
+  UpdateProfileInput,
+  UpdateProfileResult,
   VerifyOtpInput,
 } from "./auth.types";
 import { BadRequestError, ConflictError, ForbiddenError, UnauthorizedError } from "../../lib/errors";
@@ -161,6 +165,39 @@ export class AuthService implements IAuthService {
     }
     // No-op if already deleted — logout stays idempotent.
     await this.refreshTokenRepo.deleteByToken(input.refreshToken);
+  }
+
+  async getMe(userId: string): Promise<GetMeResult> {
+    const user = await this.userRepo.findById(userId);
+    if (!user) {
+      // Shouldn't happen — authMiddleware already resolved req.user from this same id.
+      throw new UnauthorizedError("User not found");
+    }
+    return { user: sanitize(user) };
+  }
+
+  async updateProfile(userId: string, input: UpdateProfileInput): Promise<UpdateProfileResult> {
+    const user = await this.userRepo.update(userId, { name: input.name.trim() });
+    return { user: sanitize(user) };
+  }
+
+  async changePassword(userId: string, input: ChangePasswordInput): Promise<void> {
+    const user = await this.userRepo.findById(userId);
+    if (!user?.passwordHash) {
+      throw new BadRequestError(
+        "This account signs in with GitHub and has no password to change"
+      );
+    }
+    const match = await bcrypt.compare(input.currentPassword, user.passwordHash);
+    if (!match) {
+      throw new UnauthorizedError("Current password is incorrect");
+    }
+    const newHash = await bcrypt.hash(input.newPassword, REGISTER_PASSWORD_BCRYPT_COST);
+    await this.userRepo.update(userId, { passwordHash: newHash });
+    // Revoke every other session/device now that the old password (and any credential that
+    // relied on it) is no longer valid. Does not touch the caller's own current access token
+    // (15 min TTL) — same accepted trade-off as logout().
+    await this.refreshTokenRepo.deleteAllForUser(userId);
   }
 
   private async issueTokens(user: User): Promise<AuthTokensResult> {
