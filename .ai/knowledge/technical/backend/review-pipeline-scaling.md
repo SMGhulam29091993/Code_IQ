@@ -366,13 +366,23 @@ cannot contain :` before ever enqueuing a single chunk. Invisible to all unit/in
 since they mock `FlowProducer` entirely. Fixed (separator changed to `-`) — see
 `memory/pitfalls.md` #016 for the full writeup.
 
-**Flagged but not fixed** (lower priority, found while diagnosing the above): the coordinator
-job's own BullMQ-level retry (`attempts: 3`, `jobs/worker.ts`'s default options) re-runs
-`process()` from scratch on each attempt, and `process()` unconditionally creates a **new**
-`Review` row every time it's called — so a coordinator job that fails after creating chunks but
-before the flow producer's Flow succeeds (exactly what the `:` bug caused) leaves one duplicate
-`Review` + duplicate `ReviewChunk` set per retry attempt, rather than resuming the one from the
-earlier attempt. Three duplicate `Review` rows for the same PR/headSha were observed directly
-from this. Not a data-corruption risk (each is independently valid, if failed/orphaned) but
-worth a proper idempotency check (e.g. look up an existing non-terminal `Review` for this
-repo+prNumber+headSha before creating a new one) if this repeats.
+**Fixed 2026-09-06** (found while diagnosing the above, on its own branch —
+`fix/review-coordinator-idempotency`): the coordinator job's own BullMQ-level retry
+(`attempts: 3`, `jobs/worker.ts`'s default options) re-runs `process()` from scratch on each
+attempt, and `process()` used to unconditionally create a **new** `Review` row every time it was
+called — so a coordinator job that failed after creating chunks but before the flow producer's
+Flow succeeded (exactly what the `:` bug above caused) left one duplicate `Review` +
+`ReviewChunk` set per retry attempt, rather than resuming the earlier attempt's row. Three
+duplicate `Review` rows for the same PR/headSha were observed directly from this.
+
+Fixed with a real idempotency key rather than an approximate repo+prNumber+headSha lookup (which
+would have wrongly conflated a genuine intentional re-review of the identical commit with a
+stale BullMQ retry): a new nullable-unique `Review.coordinatorJobId` column stores the BullMQ
+job's own id (== the GitHub webhook delivery id when present) at creation time.
+`review-coordinator.job.ts` looks this up first — if a `Review` already exists for this exact
+job id, it reuses that row (reset to `RUNNING`) instead of creating another one, and if that
+existing review already has persisted `ReviewChunk` rows (meaning an earlier attempt got past
+chunking before failing), it reuses those too instead of re-fetching the diff and re-chunking,
+which would otherwise have created a second duplicate chunk set on the *same* review. New tests
+cover all three paths (fresh job, retried job with no chunks yet, retried job with chunks
+already persisted) in `review-coordinator.job.test.ts`.

@@ -94,6 +94,12 @@ model Review {
   summary         String?
   filesReviewed   Int           @default(0)
   githubReviewId  Int?
+  // Also has totalChunks/completedChunks/truncated (decisions/007 Phase 1, 2026-08-30) — not
+  // reflected here yet, pre-existing drift from before this file's last edit, out of scope of
+  // the coordinatorJobId addition below.
+  coordinatorJobId String?      @unique // BullMQ review-coordinator-queue job id — see
+  // schema.prisma's own comment on this field for why (idempotency across BullMQ's own retries
+  // of the same job, memory/pitfalls.md #016's follow-up, 2026-09-06)
   issues          ReviewIssue[]
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt

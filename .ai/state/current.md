@@ -1,6 +1,15 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
+## 2026-09-06 (Fix: review-coordinator.job.ts idempotency, on branch `fix/review-coordinator-idempotency`)
+The duplicate-`Review`-row bug flagged in the jobId-bug entry below is now fixed on its own
+branch (cut from `feat/auth-screens` at commit `cc9d084`, since the fix touches the same file
+the jobId fix already changed): `Review.coordinatorJobId` (new column + migration) lets
+`review-coordinator.job.ts` recognize a BullMQ retry of the same job and reuse the existing
+`Review`/`ReviewChunk` rows instead of creating duplicates. 3 new tests, 366/366 passing,
+typecheck/lint/build all clean. Full detail in `state/completed.md`. **Not yet committed or
+merged** — see "Working branch" below.
+
 ## 2026-09-06 (Critical fix: Step 8 pipeline was completely broken for real reviews)
 Rebuilt the 11-day-stale containers (user's explicit go-ahead, reversing the earlier "not yet")
 and immediately found Step 8's entire chunk-fanout pipeline had never actually worked against
@@ -143,8 +152,16 @@ conditions) before trusting this at scale in production. Phase 4's dashboard UI 
    open item, and needs real cloud access this session doesn't have.
 
 ## Working branch
-This session's work landed directly on `feat/auth-screens` (the branch already checked out at
-session start) as 5 separate commits — docs+billing/repos API, then one commit per screen
-(Onboarding, Overview, Repos, Reviews, Billing). Check `git log` before assuming a different
-branch name; `memory/pitfalls.md` documents the branch-naming convention for *new* branches, but
-this session extended the existing one rather than cutting a new one.
+Stale note from earlier in this multi-day session — kept for history, superseded below. This
+session's *original* work landed directly on `feat/auth-screens` (the branch already checked out
+at session start) as 5 separate commits — docs+billing/repos API, then one commit per screen
+(Onboarding, Overview, Repos, Reviews, Billing).
+
+**2026-09-06 update:** `feat/auth-screens` kept accumulating commits all day (billing fixes,
+account tabs, the GitHub Actions slug-check workflow, the OpenRouter fallback chain, the jobId
+fix — see `state/completed.md` for all of it) — check `git log` for the real list, this note
+won't be kept exhaustively current. The one exception: the review-coordinator idempotency fix
+(this file's top entry) is on a **new** branch, `fix/review-coordinator-idempotency`, cut off
+`feat/auth-screens` at `cc9d084` — per explicit user instruction to use a fresh branch for that
+piece of work, following the `fix/*` convention `memory/pitfalls.md` documents for new branches.
+Not yet committed there as of this note.

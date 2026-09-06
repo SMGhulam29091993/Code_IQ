@@ -91,6 +91,7 @@ describe("RepoService", () => {
     reviewRepo = {
       findManyForUser: vi.fn(),
       findById: vi.fn(),
+      findByCoordinatorJobId: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
       countForUser: vi.fn().mockResolvedValue(0),

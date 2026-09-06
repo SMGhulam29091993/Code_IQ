@@ -1,6 +1,34 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-09-06 (Fix: review-coordinator.job.ts idempotency — branch `fix/review-coordinator-idempotency`)
+- Fixed the duplicate-`Review`-row bug flagged (not fixed) in the same day's earlier jobId-bug
+  entry below. New nullable-unique `Review.coordinatorJobId` column
+  (`packages/db/prisma/schema.prisma`, migration `20260906132531_add_review_coordinator_job_id`
+  — generated non-interactively via `prisma migrate diff --from-config-datasource` since
+  `prisma migrate dev` requires a TTY this environment doesn't have, then applied with
+  `prisma migrate deploy`) stores the BullMQ `review-coordinator-queue` job's own id (== the
+  GitHub webhook delivery id when present) at `Review` creation time.
+  `review-coordinator.job.ts`'s `process()` now looks up an existing `Review` by that job id
+  first — reusing it (reset to `RUNNING`) instead of calling `create` again when BullMQ retries
+  the same job (`attempts: 3`, same job.id every attempt, never a new one). Deliberately keyed
+  on the job's own identity rather than an approximate repo+prNumber+headSha lookup, which would
+  have wrongly treated a genuine intentional re-review of the identical commit (e.g. this same
+  session's manual synthetic-webhook retries) as "resume the stale one" instead of a fresh run.
+  Also reuses already-persisted `ReviewChunk` rows when a reused review already has some
+  (meaning an earlier attempt got past chunking before failing, exactly what the `:` jobId bug
+  caused) instead of re-fetching the diff and re-chunking, which would otherwise create a
+  second, duplicate chunk set on the *same* review.
+  `IReviewRepository` gained `findByCoordinatorJobId`; `CreateReviewInput` gained an optional
+  `coordinatorJobId` field. 3 new tests in `review-coordinator.job.test.ts` cover all three
+  paths (fresh job / retried job with no chunks yet / retried job with chunks already
+  persisted); updated 5 existing test files' `IReviewRepository` mocks and 2 `buildReview`
+  fixtures for the new field. `pnpm --filter @codeiq/api test` (366/366), typecheck, lint, and
+  `pnpm --filter @codeiq/db build && pnpm --filter @codeiq/api build` all clean.
+  `.ai/plans/database.md` (schema doc, per schema.prisma's own "update in the same change"
+  instruction) and `knowledge/technical/backend/review-pipeline-scaling.md`'s "First real-world
+  run" section updated to mark this fixed rather than flagged.
+
 ## 2026-09-06 (Critical fix: Step 8's chunk-fanout pipeline was completely broken for real reviews)
 - Per explicit user request, rebuilt the 11-day-stale `api`/`web` Docker containers to pick up
   Step 8's chunk-fanout pipeline, today's billing/account-tabs fixes, and the OpenRouter fallback

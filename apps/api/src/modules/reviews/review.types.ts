@@ -92,6 +92,12 @@ export interface CreateReviewInput {
   prTitle: string;
   prAuthor: string;
   headSha: string;
+  // The BullMQ review-coordinator-queue job's own id — see schema.prisma's Review.coordinatorJobId
+  // comment. Always the real job id in production (webhook.service.ts sets it to the GitHub
+  // delivery id, or BullMQ generates one); optional here only so existing CreateReviewInput
+  // call sites/tests that predate this field don't all need updating for a column they don't care
+  // about — review-coordinator.job.ts is the only real caller and always supplies it.
+  coordinatorJobId?: string;
 }
 
 export interface UpdateReviewInput {
@@ -140,6 +146,10 @@ export interface IReviewRepository {
   // it can distinguish "not found" (404) from "belongs to another user" (403), same pattern as
   // modules/repos/repo.service.ts's findOwnedRepo.
   findById(reviewId: string): Promise<ReviewWithOwner | null>;
+  // Not pre-scoped to userId, same reasoning as findById — only ever called internally by
+  // review-coordinator.job.ts (never from a controller/user-facing path). See schema.prisma's
+  // Review.coordinatorJobId comment for why this exists.
+  findByCoordinatorJobId(coordinatorJobId: string): Promise<Review | null>;
   create(input: CreateReviewInput): Promise<Review>;
   update(reviewId: string, input: UpdateReviewInput): Promise<Review>;
   countForUser(userId: string, filters: { repoId?: string; since?: Date }): Promise<number>;

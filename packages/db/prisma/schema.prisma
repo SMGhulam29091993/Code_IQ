@@ -90,26 +90,35 @@ model RepoConfig {
 }
 
 model Review {
-  id              String        @id @default(cuid())
-  repoId          String
-  repo            Repo          @relation(fields: [repoId], references: [id])
-  prNumber        Int
-  prTitle         String
-  prAuthor        String
-  headSha         String
-  status          ReviewStatus  @default(PENDING)
-  summary         String?
-  filesReviewed   Int           @default(0)
-  githubReviewId  Int?
-  totalChunks     Int           @default(0)
-  completedChunks Int           @default(0) // denormalized live-progress counter, UI-only — the
+  id               String        @id @default(cuid())
+  repoId           String
+  repo             Repo          @relation(fields: [repoId], references: [id])
+  prNumber         Int
+  prTitle          String
+  prAuthor         String
+  headSha          String
+  status           ReviewStatus  @default(PENDING)
+  summary          String?
+  filesReviewed    Int           @default(0)
+  githubReviewId   Int?
+  totalChunks      Int           @default(0)
+  completedChunks  Int           @default(0) // denormalized live-progress counter, UI-only — the
   // finalize job re-queries ReviewChunk rows directly for the DONE/FAILED gating decision, never
   // trusts this. See knowledge/technical/backend/review-pipeline-scaling.md.
-  truncated       Boolean       @default(false)
-  issues          ReviewIssue[]
-  chunks          ReviewChunk[]
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  truncated        Boolean       @default(false)
+  // The BullMQ review-coordinator-queue job's own id (== the GitHub webhook delivery id when
+  // present, jobs/queue.ts) that created this row. Nullable+unique rather than required: existing
+  // rows predate this column (backfilled null, which a unique index allows any number of), and a
+  // review created outside the webhook path (none currently exist, but nothing enforces it) would
+  // have none either. Exists so review-coordinator.job.ts can tell "BullMQ is retrying a job whose
+  // earlier attempt already created a Review" apart from "this is a genuinely new job" and reuse
+  // the existing row instead of creating a duplicate — see memory/pitfalls.md #016's follow-up and
+  // knowledge/technical/backend/review-pipeline-scaling.md's "First real-world run" section.
+  coordinatorJobId String?       @unique
+  issues           ReviewIssue[]
+  chunks           ReviewChunk[]
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 }
 
 model ReviewIssue {

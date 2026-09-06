@@ -30,11 +30,12 @@
     (2026-09-06), user's explicit choice. See `state/completed.md`.
 11. ~~Rebuild the `api`/`web` Docker containers~~ — done (2026-09-06), user's explicit choice
     (reversed the earlier "not yet"). This is what surfaced item 12 below.
-12. Add a real idempotency check to `review-coordinator.job.ts` so a BullMQ-level retry
-    (`attempts: 3`) resumes the existing `Review` row for this repo+prNumber+headSha instead of
-    unconditionally creating a new one — flagged, not fixed, 2026-09-06 (3 duplicate `Review`
-    rows observed from the jobId-bug incident's retries). See
+12. ~~Add a real idempotency check to `review-coordinator.job.ts`~~ — done (2026-09-06) on
+    `fix/review-coordinator-idempotency`: new `Review.coordinatorJobId` column (migration
+    `20260906132531_add_review_coordinator_job_id`), reused across BullMQ retries of the same
+    job, chunks reused too if already persisted. See `state/completed.md` and
     `knowledge/technical/backend/review-pipeline-scaling.md`'s "First real-world run" section.
+    Not yet merged to `feat/auth-screens`/`Dev`.
 13. Once the OpenRouter credit (item 9) or Gemini's daily quota clears, re-verify a review can
     reach real `DONE` end-to-end (post a real GitHub comment) — the 2026-09-06 rebuild proved
     the pipeline mechanically works (real chunking, real fallback chain, correct FAILED-not-
