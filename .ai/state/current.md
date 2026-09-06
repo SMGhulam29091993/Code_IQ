@@ -2,7 +2,8 @@
 > Update on every task that changes code. Never leave stale.
 
 ## 2026-09-06 side fixes (unrelated to the active task below)
-Three `codeiq29091993 Bot` Warning/Logic findings closed this session:
+Three `codeiq29091993 Bot` Warning/Logic findings closed this session, plus one new piece of
+tooling the bot's own review suggested:
 - `GET /billing/subscription` now returns 200 `planTier: 'FREE'` (with null `nextInvoice`/
   `paymentMethod`) instead of 400 for an unsubscribed installation.
 - `GET /billing/invoices` now returns 200 `{ invoices: [] }` instead of 400 for an installation
@@ -10,9 +11,16 @@ Three `codeiq29091993 Bot` Warning/Logic findings closed this session:
 - `AccountTabs.tsx`'s tab switcher uses `router.replace` instead of `router.push` (was cluttering
   browser history with one entry per tab click). `RepoDetailTabs.tsx` has the same pattern but
   wasn't flagged — not touched.
-See `state/completed.md`'s three 2026-09-06 entries and `knowledge/domains/billing.md`/
-`knowledge/screens/billing-screens.md`/`knowledge/screens/account-screens.md` for detail. Does
-not touch the frontend Step 3–9 / backend Step 7–8 work described below.
+- New: `apps/api/scripts/verify-github-app-slug.ts` + `.github/workflows/verify-github-app-
+  slug.yml` (this repo's first CI workflow) — re-verifies the GitHub App slug against GitHub's
+  own registration on a schedule/on change, per the bot's "implement automated validation"
+  suggestion on the earlier slug-drift incident. **Needs `APP_GITHUB_ID`/
+  `APP_GITHUB_PRIVATE_KEY` repo secrets added before it can actually run** — see `state/next.md`
+  item 8.
+See `state/completed.md`'s four 2026-09-06 entries and `knowledge/domains/billing.md`/
+`knowledge/screens/billing-screens.md`/`knowledge/screens/account-screens.md`/
+`knowledge/domains/github-app.md` for detail. Does not touch the frontend Step 3–9 / backend
+Step 7–8 work described below.
 
 ## 2026-08-30 side fix (unrelated to the active task below)
 `POST /auth/change-password` now revokes all of a user's other refresh tokens/sessions —

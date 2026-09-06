@@ -1,0 +1,51 @@
+name: Verify GitHub App slug
+
+# .ai/knowledge/domains/github-app.md "A real GitHub App is registered" — apps/web's
+# NEXT_PUBLIC_GITHUB_APP_SLUG (checked in as a docker-compose.yml build arg) drifted out of
+# sync with the real GitHub App registration once already (fixed 2026-08-25, a
+# codeiq29091993 Bot Warning/Logic finding), silently breaking the Onboarding screen's
+# "Install the GitHub App" link. This workflow re-verifies apps/api/scripts/verify-github-app-
+# slug.ts's check on a schedule and whenever the compose file changes, so drift is caught here
+# instead of in production.
+#
+# Requires two repo secrets to actually run: APP_GITHUB_ID and APP_GITHUB_PRIVATE_KEY
+# (base64-encoded PEM, same encoding as apps/api/.env's GITHUB_APP_PRIVATE_KEY) — named with
+# that prefix rather than GITHUB_* because GitHub Actions rejects secret names starting with
+# the reserved GITHUB_ prefix; they're remapped to the script's expected GITHUB_APP_ID /
+# GITHUB_APP_PRIVATE_KEY env var names below. Without them the job fails fast with a clear
+# "must both be set" error rather than silently passing.
+
+on:
+  push:
+    paths:
+      - "apps/api/docker-compose.yml"
+      - "apps/api/scripts/verify-github-app-slug.ts"
+  pull_request:
+    paths:
+      - "apps/api/docker-compose.yml"
+      - "apps/api/scripts/verify-github-app-slug.ts"
+  schedule:
+    - cron: "0 9 * * 1" # weekly, Monday 09:00 UTC — catches drift even when nothing in-repo changed
+  workflow_dispatch: {}
+
+jobs:
+  verify-slug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable corepack (pnpm)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify slug matches GitHub's registration
+        run: pnpm --filter @codeiq/api run verify:github-app-slug
+        env:
+          GITHUB_APP_ID: ${{ secrets.APP_GITHUB_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.APP_GITHUB_PRIVATE_KEY }}

@@ -1,6 +1,32 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-09-06 (New: automated GitHub App slug drift check)
+- `codeiq29091993 Bot`'s own review of the 2026-08-25 slug-drift incident (see that entry in
+  this file) suggested "regularly verify GitHub App configuration... implement automated
+  validation... to prevent drift" rather than relying on a human to notice a 404'd install link
+  again. Built per explicit user request (chose "script + a new GitHub Actions workflow" over
+  "leave as-is" or "startup check only"):
+  - `apps/api/scripts/verify-github-app-slug.ts` — standalone script (deliberately doesn't
+    import `lib/env.ts`/`lib/octokit.ts`, which pull in the full env schema this check doesn't
+    need): parses `docker-compose.yml`'s checked-in `NEXT_PUBLIC_GITHUB_APP_SLUG` build arg,
+    calls `GET /app` via a fresh `createAppAuth`-authenticated Octokit using `GITHUB_APP_ID`/
+    `GITHUB_APP_PRIVATE_KEY` from the environment, and exits non-zero with a clear diff message
+    on mismatch. Wired up as `pnpm --filter @codeiq/api run verify:github-app-slug`. Verified
+    live against the real GitHub API using this session's own local credentials — both the
+    match case and the missing-credentials error case.
+  - `.github/workflows/verify-github-app-slug.yml` (this repo's first GitHub Actions workflow) —
+    runs the script on push/PR touching either the script or `docker-compose.yml`, weekly on a
+    schedule, and on manual dispatch. Needs two repo secrets this session couldn't add:
+    `APP_GITHUB_ID` / `APP_GITHUB_PRIVATE_KEY` — named with that prefix rather than `GITHUB_*`
+    because GitHub Actions rejects secret names starting with the reserved `GITHUB_` prefix; the
+    workflow step remaps them to the script's expected `GITHUB_APP_ID`/`GITHUB_APP_PRIVATE_KEY`
+    env var names. See `state/next.md` item 8.
+  `knowledge/domains/github-app.md`'s slug-drift note extended with this follow-up.
+  `pnpm --filter @codeiq/api typecheck`/`lint` clean (the script sits outside `tsconfig.json`'s
+  `include`, so it's typechecked standalone via a one-off `tsc --noEmit` invocation, not part of
+  the package's normal `typecheck` script).
+
 ## 2026-09-06 (Fix: Account tabs use router.replace, not push)
 - `codeiq29091993 Bot`'s automated review flagged (Warning/Logic) that `AccountTabs.tsx`'s tab
   switcher used `router.push`, adding a distinct browser-history entry per tab click on what's
