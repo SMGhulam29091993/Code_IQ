@@ -345,9 +345,9 @@ export const getInstallationOctokit = async (githubInstallationId: number) => {
   `docker-compose.yml`'s checked-in `NEXT_PUBLIC_GITHUB_APP_SLUG`, run via `pnpm --filter
   @codeiq/api run verify:github-app-slug`. Wired into `.github/workflows/verify-github-app-
   slug.yml` — runs on push/PR touching either file, weekly on a schedule, and on manual dispatch.
-  Needs two repo secrets to actually run, **not yet added** (this session had no access to
-  configure them): `APP_GITHUB_ID` and `APP_GITHUB_PRIVATE_KEY` (same base64-PEM encoding as
-  `apps/api/.env`'s `GITHUB_APP_PRIVATE_KEY`) — named with that prefix, not `GITHUB_*`, because
-  GitHub Actions rejects secret names starting with the reserved `GITHUB_` prefix. Verified
-  locally against the real GitHub API (both the match and the missing-credentials-error paths),
-  not yet verified running inside Actions itself.
+  Needed two repo secrets to actually run — `APP_GITHUB_ID` and `APP_GITHUB_PRIVATE_KEY` (same
+  base64-PEM encoding as `apps/api/.env`'s `GITHUB_APP_PRIVATE_KEY`), named with that prefix
+  rather than `GITHUB_*` because GitHub Actions rejects secret names starting with the reserved
+  `GITHUB_` prefix. User added both; confirmed green on a real Actions run 2026-09-06 (first run
+  failed with the script's own "must both be set" error before the secrets existed, exactly as
+  designed, then passed once they were added).

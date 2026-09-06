@@ -14,9 +14,8 @@ tooling the bot's own review suggested:
 - New: `apps/api/scripts/verify-github-app-slug.ts` + `.github/workflows/verify-github-app-
   slug.yml` (this repo's first CI workflow) — re-verifies the GitHub App slug against GitHub's
   own registration on a schedule/on change, per the bot's "implement automated validation"
-  suggestion on the earlier slug-drift incident. **Needs `APP_GITHUB_ID`/
-  `APP_GITHUB_PRIVATE_KEY` repo secrets added before it can actually run** — see `state/next.md`
-  item 8.
+  suggestion on the earlier slug-drift incident. Repo secrets added, confirmed green on a real
+  Actions run.
 See `state/completed.md`'s four 2026-09-06 entries and `knowledge/domains/billing.md`/
 `knowledge/screens/billing-screens.md`/`knowledge/screens/account-screens.md`/
 `knowledge/domains/github-app.md` for detail. Does not touch the frontend Step 3–9 / backend

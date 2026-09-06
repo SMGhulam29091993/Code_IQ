@@ -18,7 +18,6 @@
 7. Email-change flow and "log out other sessions on password change" — both explicitly flagged
    as gaps in `knowledge/domains/auth.md`'s `PATCH /auth/me` and `POST /auth/change-password`
    sections, not built this pass
-8. Add `APP_GITHUB_ID` / `APP_GITHUB_PRIVATE_KEY` repo secrets (Settings → Secrets and variables
-   → Actions) so `.github/workflows/verify-github-app-slug.yml` can actually run — this session
-   had no access to add them. See `knowledge/domains/github-app.md`'s "Automated drift check"
-   note for values/encoding (same base64-PEM as `apps/api/.env`'s `GITHUB_APP_PRIVATE_KEY`).
+8. ~~Add `APP_GITHUB_ID` / `APP_GITHUB_PRIVATE_KEY` repo secrets~~ — done (2026-09-06), workflow
+   confirmed green on a real Actions run. See `knowledge/domains/github-app.md`'s "Automated
+   drift check" note.
