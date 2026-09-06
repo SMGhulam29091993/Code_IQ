@@ -237,7 +237,8 @@ describe('BillingService.getSeats', () => {
 **Edge cases:**
 | Case | Expected behaviour | Status |
 |------|--------------------|-|
-| Installation has no `stripeCustomerId` | 400 `"No billing history found"` | |
+| Installation has no `stripeCustomerId` | 200, `{ invoices: [] }` — same shape as "no invoices yet", not a 400 (flagged as a Warning finding by `codeiq29091993 Bot`'s own review — 2026-09-06, for consistency with that other empty-array case) | |
+| No installation for user | 400 `"No billing history found"` | |
 | Stripe API unavailable | 502 | |
 | No invoices yet (subscribed same day) | `{ invoices: [] }` | |
 
@@ -246,7 +247,8 @@ describe('BillingService.getSeats', () => {
 describe('BillingService.getInvoices', () => {
   it('returns invoices for the installation\'s Stripe customer')
   it('respects the limit param up to 50')
-  it('throws BadRequestError when installation has no stripeCustomerId')
+  it('returns { invoices: [] } when installation has no stripeCustomerId')
+  it('throws BadRequestError when user has no installation')
   it('returns empty array when customer has no invoices yet')
 })
 ```

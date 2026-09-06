@@ -273,10 +273,19 @@ describe("BillingService", () => {
       expect(stripeClient.invoices.list).toHaveBeenCalledWith({ customer: "cus_1", limit: 50 });
     });
 
-    it("throws BadRequestError when installation has no stripeCustomerId", async () => {
+    it("returns { invoices: [] } when installation has no stripeCustomerId", async () => {
       vi.mocked(installationRepo.findByUserId).mockResolvedValue(
         buildInstallation({ stripeCustomerId: null })
       );
+
+      const result = await service.getInvoices("user-1", {});
+
+      expect(result).toEqual({ invoices: [] });
+      expect(stripeClient.invoices.list).not.toHaveBeenCalled();
+    });
+
+    it("throws BadRequestError when user has no installation", async () => {
+      vi.mocked(installationRepo.findByUserId).mockResolvedValue(null);
 
       await expect(service.getInvoices("user-1", {})).rejects.toThrow(BadRequestError);
     });

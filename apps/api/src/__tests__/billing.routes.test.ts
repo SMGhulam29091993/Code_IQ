@@ -316,7 +316,7 @@ describe("Billing routes", () => {
       expect(res.status).toBe(401);
     });
 
-    it("returns 400 when installation has no Stripe customer", async () => {
+    it("returns 200 with { invoices: [] } when installation has no Stripe customer", async () => {
       mockPrisma().user.findUnique.mockResolvedValueOnce(buildUser());
       mockPrisma().installation.findFirst.mockResolvedValueOnce(buildInstallation());
 
@@ -324,8 +324,8 @@ describe("Billing routes", () => {
         .get("/api/billing/invoices")
         .set("Authorization", `Bearer ${accessTokenFor("user-1")}`);
 
-      expect(res.status).toBe(400);
-      expect(res.body.message).toBe("No billing history found");
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual({ invoices: [] });
     });
 
     it("returns 200 with invoices for a subscribed installation", async () => {

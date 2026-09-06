@@ -1,6 +1,24 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-09-06 (Fix: GET /billing/invoices returns 200 { invoices: [] } instead of 400)
+- Same class of finding as this session's `GET /billing/subscription` fix, flagged separately by
+  `codeiq29091993 Bot`'s own review (Warning/Logic): `GET /billing/invoices` threw 400 `"No
+  billing history found"` for an installation with no `stripeCustomerId`, inconsistent with the
+  already-documented "no invoices yet (subscribed same day)" case, which returns the same `{
+  invoices: [] }` shape with 200. Fixed: `BillingService.getInvoices` now returns `{ invoices: []
+  }` instead of throwing when `stripeCustomerId` is missing; the separate "no installation at all
+  for this user" case is unchanged (still 400 `"No billing history found"` — not part of this
+  finding, kept its original message).
+- Updated `billing.service.test.ts` and `billing.routes.test.ts` to match (split the old combined
+  `!installation?.stripeCustomerId` test into a "returns empty array" case and a distinct
+  "throws when no installation" case). `knowledge/domains/billing.md`'s edge-case table and unit
+  test list updated. No frontend changes needed — `InvoicesList.tsx` already renders "No invoices
+  yet." off an empty array; it was only ever seeing the 400-as-error path when
+  `stripeCustomerId` was missing on an otherwise-subscribed-looking installation. `pnpm --filter
+  @codeiq/api test` (349/349) and `pnpm --filter @codeiq/web test` (96/96) pass; both apps
+  typecheck and lint clean.
+
 ## 2026-09-06 (Fix: GET /billing/subscription returns 200 FREE instead of 400)
 - `codeiq29091993 Bot`'s automated review flagged (Warning/Logic) that `GET /billing/subscription`
   returned 400 `"No active subscription found"` for a valid FREE-tier installation — semantically

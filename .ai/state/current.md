@@ -1,12 +1,16 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
-## 2026-09-06 side fix (unrelated to the active task below)
-`GET /billing/subscription` now returns 200 `planTier: 'FREE'` (with null `nextInvoice`/
-`paymentMethod`) instead of 400 for an unsubscribed installation — closed a Warning/Logic
-finding from `codeiq29091993 Bot`'s automated review. See `state/completed.md`'s 2026-09-06
-entry and `knowledge/domains/billing.md`/`knowledge/screens/billing-screens.md` for the detail.
-Does not touch the frontend Step 3–9 / backend Step 7–8 work described below.
+## 2026-09-06 side fixes (unrelated to the active task below)
+Two `codeiq29091993 Bot` Warning/Logic findings closed, both the same "GET on a valid resource
+shouldn't 400" pattern:
+- `GET /billing/subscription` now returns 200 `planTier: 'FREE'` (with null `nextInvoice`/
+  `paymentMethod`) instead of 400 for an unsubscribed installation.
+- `GET /billing/invoices` now returns 200 `{ invoices: [] }` instead of 400 for an installation
+  with no `stripeCustomerId`.
+See `state/completed.md`'s two 2026-09-06 entries and `knowledge/domains/billing.md`/
+`knowledge/screens/billing-screens.md` for detail. Does not touch the frontend Step 3–9 /
+backend Step 7–8 work described below.
 
 ## 2026-08-30 side fix (unrelated to the active task below)
 `POST /auth/change-password` now revokes all of a user's other refresh tokens/sessions —

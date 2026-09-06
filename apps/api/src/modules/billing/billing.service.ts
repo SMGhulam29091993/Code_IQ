@@ -214,8 +214,11 @@ export class BillingService implements IBillingService {
 
   async getInvoices(userId: string, input: GetInvoicesInput): Promise<InvoicesResult> {
     const installation = await this.installationRepo.findByUserId(userId);
-    if (!installation?.stripeCustomerId) {
+    if (!installation) {
       throw new BadRequestError("No billing history found");
+    }
+    if (!installation.stripeCustomerId) {
+      return { invoices: [] };
     }
 
     const limit = Math.min(input.limit ?? DEFAULT_INVOICES_LIMIT, MAX_INVOICES_LIMIT);
