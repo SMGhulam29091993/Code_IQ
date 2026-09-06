@@ -222,7 +222,7 @@ describe("Review routes", () => {
               name: "review-chunk",
               queueName: "review-chunk-queue",
               data: expect.objectContaining({ reviewId: "review-1", chunkId: "chunk-1" }),
-              opts: expect.objectContaining({ jobId: "review-1:chunk-1:retry1" }),
+              opts: expect.objectContaining({ jobId: "review-1-chunk-1-retry1" }),
             }),
           ],
         })

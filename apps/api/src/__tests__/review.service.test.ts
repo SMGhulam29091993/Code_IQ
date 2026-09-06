@@ -325,7 +325,7 @@ describe("ReviewService", () => {
               filename: "a.ts",
             }),
             opts: expect.objectContaining({
-              jobId: "review-1:chunk-1:retry1",
+              jobId: "review-1-chunk-1-retry1",
               priority: 1,
               failParentOnFailure: false,
             }),

@@ -353,3 +353,26 @@ confirm truncation and fairness behave as designed end-to-end.
 Each phase needs `knowledge/domains/review.md` updated to match (pseudocode there currently
 describes today's single-job pipeline) once actually built — not before, per this project's
 usual practice of documenting what's real, not what's planned.
+
+### First real-world run (2026-09-06) — one critical bug found, one gap flagged
+
+All four phases above shipped 2026-08-30 but the containers ran stale pre-Step-8 code until
+2026-09-06's rebuild (`state/completed.md`), so none of this had ever actually run against real
+Redis/BullMQ until that day. It found a real, previously-invisible bug immediately:
+**`review-coordinator.job.ts` and `review.service.ts`'s `retryReview` both built child `jobId`s
+with a `:` separator, which the installed BullMQ version (5.80.8, inside the `^5.21.0` range
+`package.json` pins) rejects outright** — every real coordinator run crashed with `Custom Id
+cannot contain :` before ever enqueuing a single chunk. Invisible to all unit/integration tests
+since they mock `FlowProducer` entirely. Fixed (separator changed to `-`) — see
+`memory/pitfalls.md` #016 for the full writeup.
+
+**Flagged but not fixed** (lower priority, found while diagnosing the above): the coordinator
+job's own BullMQ-level retry (`attempts: 3`, `jobs/worker.ts`'s default options) re-runs
+`process()` from scratch on each attempt, and `process()` unconditionally creates a **new**
+`Review` row every time it's called — so a coordinator job that fails after creating chunks but
+before the flow producer's Flow succeeds (exactly what the `:` bug caused) leaves one duplicate
+`Review` + duplicate `ReviewChunk` set per retry attempt, rather than resuming the one from the
+earlier attempt. Three duplicate `Review` rows for the same PR/headSha were observed directly
+from this. Not a data-corruption risk (each is independently valid, if failed/orphaned) but
+worth a proper idempotency check (e.g. look up an existing non-terminal `Review` for this
+repo+prNumber+headSha before creating a new one) if this repeats.

@@ -112,7 +112,12 @@ export class ReviewCoordinatorJobProcessor {
             repoConfig,
           },
           opts: {
-            jobId: `${review.id}:${row.id}`,
+            // Not `${review.id}:${row.id}` — found live 2026-09-06 running a real coordinator
+            // job against real Redis/BullMQ: this installed BullMQ version (5.80.8, inside the
+            // `^5.21.0` range package.json pins) rejects any custom jobId containing `:` with
+            // "Custom Id cannot contain :", something no unit/integration test caught since
+            // they all mock FlowProducer entirely. `-` is safe — cuids never contain it.
+            jobId: `${review.id}-${row.id}`,
             priority,
             attempts: 3,
             backoff: { type: "exponential", delay: 2000 },

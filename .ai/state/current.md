@@ -1,6 +1,20 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
+## 2026-09-06 (Critical fix: Step 8 pipeline was completely broken for real reviews)
+Rebuilt the 11-day-stale containers (user's explicit go-ahead, reversing the earlier "not yet")
+and immediately found Step 8's entire chunk-fanout pipeline had never actually worked against
+real Redis/BullMQ: a `:` character in BullMQ job IDs is rejected by the installed BullMQ version,
+invisible to all mocked tests. Fixed (`memory/pitfalls.md` #016). Also handled the two orphaned
+`RUNNING` reviews from 2026-08-25 (marked `FAILED` in DB) and confirmed — before doing anything
+irreversible — that the standard retry endpoint would have posted a **false "no issues" comment
+to the real GitHub PR** for today's 7 real failed reviews, since they predate the ReviewChunk
+schema. Triggered one real fresh review instead (synthetic webhook, proper HMAC signature) for
+PR #8's actual current head, which is what surfaced the jobId bug. After the fix + rebuild, a
+second attempt genuinely chunked the real diff (30 chunks) and exercised the full Gemini→
+OpenRouter fallback end-to-end — settled `FAILED` because both providers are still exhausted
+(safe, correct outcome; no false report posted). Full detail in `state/completed.md`.
+
 ## 2026-09-06 (New: OpenRouter multi-model fallback — decisions/008)
 Root cause of "PRs failing today" traced to Gemini's undocumented 20-requests/day free-tier
 quota (separate from the per-minute quota already handled). Built a proper multi-model fallback

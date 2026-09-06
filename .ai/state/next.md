@@ -26,11 +26,17 @@
    during `decisions/008`'s live-testing (every configured model failing identically at once,
    not per-model shared-pool congestion). OpenRouter ties a meaningfully higher free-tier
    ceiling to a one-time credit purchase rather than ongoing spend. Billing action — user's call.
-10. Manually mark the 2 permanently `RUNNING` reviews from 2026-08-25
-    (`cmt923ad6000001p3x0bnqqxy`, `cmt92bgwz000101p3suoesn1x`) as `FAILED` in the DB — orphaned
-    when their worker died with the container mid-session; predate the Step 8 `ReviewChunk`
-    schema so the resumable-retry endpoint can't pick them up. Flagged, not fixed, 2026-09-06.
-11. Rebuild the `api`/`web` Docker containers (`docker compose build api web && docker compose
-    up -d`, `apps/api/docker-compose.yml`) — currently running code from 2026-08-26, 11 days
-    stale: missing all of Step 8's chunk fan-out pipeline, the billing/account-tabs fixes, and
-    this session's OpenRouter fallback chain. Explicitly deferred by the user 2026-09-06.
+10. ~~Manually mark the 2 permanently `RUNNING` reviews from 2026-08-25 as `FAILED`~~ — done
+    (2026-09-06), user's explicit choice. See `state/completed.md`.
+11. ~~Rebuild the `api`/`web` Docker containers~~ — done (2026-09-06), user's explicit choice
+    (reversed the earlier "not yet"). This is what surfaced item 12 below.
+12. Add a real idempotency check to `review-coordinator.job.ts` so a BullMQ-level retry
+    (`attempts: 3`) resumes the existing `Review` row for this repo+prNumber+headSha instead of
+    unconditionally creating a new one — flagged, not fixed, 2026-09-06 (3 duplicate `Review`
+    rows observed from the jobId-bug incident's retries). See
+    `knowledge/technical/backend/review-pipeline-scaling.md`'s "First real-world run" section.
+13. Once the OpenRouter credit (item 9) or Gemini's daily quota clears, re-verify a review can
+    reach real `DONE` end-to-end (post a real GitHub comment) — the 2026-09-06 rebuild proved
+    the pipeline mechanically works (real chunking, real fallback chain, correct FAILED-not-
+    false-positive behavior) but every provider was still exhausted throughout testing, so a
+    genuine success has still never been observed against a real PR review.

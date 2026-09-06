@@ -243,7 +243,7 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
             repoConfig: DEFAULT_CONFIG,
           },
           opts: {
-            jobId: "review-1:chunk-1",
+            jobId: "review-1-chunk-1",
             priority: 1,
             attempts: 3,
             backoff: { type: "exponential", delay: 2000 },
