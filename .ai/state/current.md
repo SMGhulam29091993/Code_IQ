@@ -1,6 +1,17 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
+## 2026-09-12 (Milestone + fix, on branch `fix/github-review-id-overflow`)
+The `fix/review-coordinator-idempotency` PR merged and its own triggered review became this
+pipeline's **first-ever genuine success** — a real comment posted to GitHub PR #9 via the
+OpenRouter fallback chain. That success immediately crashed the finalize job's own DB write
+(`Review.githubReviewId` was a 32-bit `Int`; real GitHub ids don't fit) — fixed by widening to
+`BigInt` with conversion contained to `review.repository.ts`/`review.service.ts`'s Prisma
+boundary. New migration `20260912085606_widen_github_review_id_to_bigint`. The stuck review row
+manually reconciled to its real, correct state. 369/369 tests, typecheck/lint/build all clean.
+Full detail in `state/completed.md`, `memory/pitfalls.md` #017. Committed on the new branch, not
+yet merged.
+
 ## 2026-09-06 (Fix: review-coordinator.job.ts idempotency, on branch `fix/review-coordinator-idempotency`)
 The duplicate-`Review`-row bug flagged in the jobId-bug entry below is now fixed on its own
 branch (cut from `feat/auth-screens` at commit `cc9d084`, since the fix touches the same file

@@ -47,7 +47,18 @@ export class ReviewRepository implements IReviewRepository {
   }
 
   update(reviewId: string, input: UpdateReviewInput) {
-    return prisma.review.update({ where: { id: reviewId }, data: input });
+    // githubReviewId is BigInt at rest (schema.prisma — real GitHub review ids overflow a 32-bit
+    // Int) but a plain number everywhere in the business/API layer (review.service.ts's
+    // sanitizeReview converts back on the way out) — this is the one place the conversion
+    // needs to happen, going in.
+    const { githubReviewId, ...rest } = input;
+    return prisma.review.update({
+      where: { id: reviewId },
+      data: {
+        ...rest,
+        ...(githubReviewId !== undefined ? { githubReviewId: BigInt(githubReviewId) } : {}),
+      },
+    });
   }
 
   countForUser(userId: string, filters: { repoId?: string; since?: Date }) {

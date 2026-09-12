@@ -208,7 +208,9 @@ function sanitizeReview(review: ReviewWithOwner): SanitizedReview {
     ...sanitizeReviewSummary(review),
     headSha: review.headSha,
     summary: review.summary,
-    githubReviewId: review.githubReviewId,
+    // BigInt at rest (schema.prisma) doesn't JSON-serialize — convert back to a plain number for
+    // the wire. Safe: GitHub review ids stay far under Number.MAX_SAFE_INTEGER.
+    githubReviewId: review.githubReviewId !== null ? Number(review.githubReviewId) : null,
     issues: review.issues.map(sanitizeIssue),
   };
 }

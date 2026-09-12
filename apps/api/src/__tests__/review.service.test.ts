@@ -292,6 +292,20 @@ describe("ReviewService", () => {
 
       expect(result.review.issues).toEqual([]);
     });
+
+    // githubReviewId is BigInt at rest (schema.prisma — real ids overflow a 32-bit Int, found
+    // live 2026-09-12) but a plain number on the wire; JSON.stringify throws on a raw bigint, so
+    // this conversion isn't optional.
+    it("converts a BigInt githubReviewId to a plain number, including values that overflow a 32-bit Int", async () => {
+      vi.mocked(reviewRepo.findById).mockResolvedValue(
+        buildOwnedReview({ githubReviewId: 5185926759n })
+      );
+
+      const result = await service.getReview("user-1", "review-1");
+
+      expect(result.review.githubReviewId).toBe(5185926759);
+      expect(() => JSON.stringify(result.review)).not.toThrow();
+    });
   });
 
   describe("retryReview", () => {

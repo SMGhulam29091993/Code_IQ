@@ -1,6 +1,46 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-09-12 (Milestone + fix: first-ever real successful review, then a real bug fixed — branch `fix/github-review-id-overflow`)
+- The `fix/review-coordinator-idempotency` PR (#9) got merged, which itself triggered a real
+  webhook review of that same PR. Found `RUNNING` since 2026-09-06 (6 days) when checked —
+  the local `pnpm dev` worker had been intermittently up/down, so it kept trickling through the
+  same 21 chunks whenever it happened to be running. User asked to pause it; while clearing the
+  queue (same approach as the earlier pause, `Queue.getJobs` + `.remove()` for this reviewId),
+  found its `review-finalize-queue` job was already actively locked/processing — and unlike
+  every previous attempt this session, this one had 2 of 21 chunks reach real `DONE` (through
+  the OpenRouter fallback chain, during a clear window), so the finalize job's "all chunks
+  failed" short-circuit didn't apply. It genuinely finished: posted a **real review comment to
+  the actual GitHub PR #9** (`codeiq29091993[bot]`, review id `5185926759`, confirmed live via
+  `octokit.pulls.listReviews` — its own body correctly diagnosed the OpenRouter throttle issue
+  this whole session had been fighting). First real success this pipeline has ever achieved.
+- That success immediately exposed a new, real bug: the finalize job's own
+  `reviewRepo.update(reviewId, { status: "DONE", githubReviewId, ... })` crashed with a Postgres
+  `integer` range error — `Review.githubReviewId` was a 32-bit `Int`, and `5185926759` doesn't
+  fit. Left the `Review` row stuck showing `RUNNING` locally despite GitHub already having the
+  correct, real review. Full writeup in `memory/pitfalls.md` #017.
+- Fixed on a fresh branch (`fix/github-review-id-overflow`, deliberately separate from the
+  idempotency fix — unrelated bug): `Review.githubReviewId` widened to `BigInt` (migration
+  `20260912085606_widen_github_review_id_to_bigint`, same non-interactive `prisma migrate diff
+  --from-config-datasource` + hand-placed migration folder + `migrate deploy` approach as the
+  previous migration, since `migrate dev` still needs a TTY this environment doesn't have).
+  `ReviewRepository.update` converts an incoming plain-number `githubReviewId` to `BigInt(...)`
+  before writing; `review.service.ts`'s `sanitizeReview` converts back to `Number(...)` on the
+  way out (safe — GitHub ids stay far under `Number.MAX_SAFE_INTEGER`; a raw `bigint` would
+  otherwise throw on `JSON.stringify` if it ever reached a response body). Business-facing types
+  (`UpdateReviewInput`, `SanitizedReview`) unchanged — only the repository's Prisma-facing edge
+  does the conversion. New tests: `review.repository.test.ts` (new file — this repository had no
+  dedicated unit test before, matching this project's "thin passthroughs don't get one, real
+  logic does" pattern) covers the BigInt conversion directly; `review.service.test.ts` gained a
+  case asserting the sanitizer's output round-trips through `JSON.stringify` without throwing.
+  369/369 tests, typecheck, lint, and `pnpm --filter @codeiq/db build && pnpm --filter
+  @codeiq/api build` all clean.
+- Manually reconciled the stuck `Review` row once the schema could hold the real value: `status:
+  DONE`, the real `githubReviewId` (`5185926759`), and `filesReviewed` recomputed as `2` (the
+  count of distinct filenames among the review's actually-`DONE` `ReviewChunk` rows) rather than
+  its stale `0`. `.ai/plans/database.md` updated per `schema.prisma`'s own "update in the same
+  change" instruction.
+
 ## 2026-09-06 (Fix: review-coordinator.job.ts idempotency — branch `fix/review-coordinator-idempotency`)
 - Fixed the duplicate-`Review`-row bug flagged (not fixed) in the same day's earlier jobId-bug
   entry below. New nullable-unique `Review.coordinatorJobId` column

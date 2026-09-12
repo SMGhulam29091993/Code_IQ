@@ -100,7 +100,11 @@ model Review {
   status           ReviewStatus  @default(PENDING)
   summary          String?
   filesReviewed    Int           @default(0)
-  githubReviewId   Int?
+  // A 32-bit Int overflows on real GitHub review ids (e.g. 5185926759, hit live 2026-09-12 on
+  // this project's own dogfooded PR #9) — GitHub's id space long ago outgrew Int4. BigInt at
+  // rest; the API layer (review.service.ts's sanitizeReview) converts back to a plain JS
+  // number for the wire, safe since GitHub ids stay well under Number.MAX_SAFE_INTEGER.
+  githubReviewId   BigInt?
   totalChunks      Int           @default(0)
   completedChunks  Int           @default(0) // denormalized live-progress counter, UI-only — the
   // finalize job re-queries ReviewChunk rows directly for the DONE/FAILED gating decision, never

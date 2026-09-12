@@ -93,7 +93,9 @@ model Review {
   status          ReviewStatus  @default(PENDING)
   summary         String?
   filesReviewed   Int           @default(0)
-  githubReviewId  Int?
+  githubReviewId  BigInt?       // was Int — real GitHub review ids overflow 32 bits
+  // (memory/pitfalls.md #017, 2026-09-12). Business/API layer still uses a plain number;
+  // review.repository.ts / review.service.ts convert at the Prisma boundary.
   // Also has totalChunks/completedChunks/truncated (decisions/007 Phase 1, 2026-08-30) — not
   // reflected here yet, pre-existing drift from before this file's last edit, out of scope of
   // the coordinatorJobId addition below.
