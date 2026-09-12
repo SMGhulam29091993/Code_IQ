@@ -176,4 +176,43 @@ describe("FallbackLLMClient", () => {
   it("throws at construction time when given no clients", () => {
     expect(() => new FallbackLLMClient([])).toThrow();
   });
+
+  // codeiq29091993 Bot's own review of decisions/008 (2026-09-12): OpenRouter's account-level
+  // throttle takes every configured model down at once, and the per-tier warnings alone mean
+  // piecing that together from N log lines. This one clear, greppable summary line is the fix —
+  // doesn't recover from the throttle (that still needs the $10 credit purchase, external to
+  // this code), just makes the failure mode diagnosable at a glance.
+  it("logs one summary line naming every tier and its failure reason when the whole chain is exhausted", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const first: ILLMClient = {
+      generateContent: vi.fn().mockRejectedValue(openRouterError(429)),
+    };
+    const second: ILLMClient = {
+      generateContent: vi.fn().mockRejectedValue(openRouterError(401)),
+    };
+    const chain = new FallbackLLMClient([
+      { client: first, label: "first" },
+      { client: second, label: "second" },
+    ]);
+
+    await expect(chain.generateContent({ contents: [] })).rejects.toThrow();
+
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("ALL_TIERS_EXHAUSTED (2/2 tiers failed): first=429, second=401")
+    );
+    consoleError.mockRestore();
+  });
+
+  it("labels a daily-quota 429 distinctly from a plain 429 in the summary line", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const first: ILLMClient = {
+      generateContent: vi.fn().mockRejectedValue(geminiDailyQuotaError()),
+    };
+    const chain = new FallbackLLMClient([{ client: first, label: "gemini-2.5-flash" }]);
+
+    await expect(chain.generateContent({ contents: [] })).rejects.toThrow();
+
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("gemini-2.5-flash=429(daily quota)"));
+    consoleError.mockRestore();
+  });
 });

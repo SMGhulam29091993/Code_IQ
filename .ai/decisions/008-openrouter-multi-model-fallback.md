@@ -100,3 +100,22 @@ assumed up front:
 **Applies to:** backend (`apps/api/src/lib/gemini.ts`, `apps/api/src/lib/openrouter.ts`,
 `apps/api/src/lib/llm-client.ts`, `apps/api/src/modules/reviews/gemini.service.ts`,
 `apps/api/src/modules/reviews/review.types.ts`, `apps/api/src/container.ts`)
+
+## Addendum (2026-09-12): diagnosability for the account-level-throttle negative above
+
+`codeiq29091993 Bot`'s own review of this ADR flagged the account-level-throttle negative
+consequence above, suggesting monitoring/alerting since "the current fallback logic won't
+recover from this specific throttle." Correct, and not something code can fix — the recovery is
+external (the $10 credit purchase, still not done as of this addendum). What *is* in scope:
+diagnosability. Before this addendum, `FallbackLLMClient` logged one `console.warn` per exhausted
+tier (six lines when every tier fails), with nothing marking "this was a full-chain failure, not
+an isolated one" — piecing that together meant reading and correlating all six.
+
+**Decision:** `FallbackLLMClient.generateContent` now also logs one `console.error` summary line
+when every tier is exhausted — `ALL_TIERS_EXHAUSTED (N/N tiers failed): tier1=reason1,
+tier2=reason2, ...` — with a short per-tier reason (`describeError`: HTTP status, `429(daily
+quota)` for Gemini's specific case, or `network error` for a status-less failure). Deliberately
+scoped to logging only, not a monitoring service/scheduled check/user-facing alert — those were
+considered and explicitly declined (user's call) in favor of the smallest change that makes the
+already-existing failure mode grep-able (`grep ALL_TIERS_EXHAUSTED`) instead of needing to
+reconstruct it from scattered per-tier warnings.

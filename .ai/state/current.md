@@ -1,6 +1,26 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
+## 2026-09-12 (Diagnosability fix, on branch `fix/llm-client-exhaustion-summary-log`)
+Per a `codeiq29091993 Bot` review of `decisions/008` flagging the OpenRouter account-throttle
+gap: added one clear `ALL_TIERS_EXHAUSTED` summary log line to `FallbackLLMClient` when every
+tier fails, scoped to logging-only (user's explicit choice over building monitoring/alerting
+infra). 368/368 tests, typecheck/lint/build clean. Full detail in `state/completed.md`,
+addendum in `decisions/008`.
+
+**As-of-this-session branch inventory** (4 sibling branches off the same merged base
+`6e94982`, each a distinct unrelated fix, none merged into each other):
+- `fix/github-review-id-overflow` (`f16385b`) — githubReviewId BigInt fix — pushed? no (last
+  checked 2026-09-12, local-only)
+- `fix/billing-private-repo-copy` (`65ed905`) — billing copy fix — pushed? no (local-only)
+- `fix/llm-client-exhaustion-summary-log` (this entry) — pushed? no (local-only, just created)
+Mid-session, the working directory was found switched to `fix/review-coordinator-idempotency`
+(already merged) — not a revert of the other two branches' work (both confirmed intact via
+`git log --oneline <branch> -1` before proceeding), just something to watch for: branch
+switches from outside this session (IDE, user's own terminal) aren't visible here, and the
+gitignored generated Prisma client needs a manual `prisma generate` after one to match
+whichever branch's `schema.prisma` is actually checked out.
+
 ## 2026-09-06 (Fix: review-coordinator.job.ts idempotency, on branch `fix/review-coordinator-idempotency`)
 The duplicate-`Review`-row bug flagged in the jobId-bug entry below is now fixed on its own
 branch (cut from `feat/auth-screens` at commit `cc9d084`, since the fix touches the same file

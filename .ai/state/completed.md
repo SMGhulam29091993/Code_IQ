@@ -1,6 +1,30 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-09-12 (Diagnosability: ALL_TIERS_EXHAUSTED summary log — branch `fix/llm-client-exhaustion-summary-log`)
+- `codeiq29091993 Bot`'s own review of `decisions/008` flagged that OpenRouter's account-level
+  free-tier throttle undermines the fallback strategy (every model fails together, and the
+  recovery — a $10 credit purchase — is external to the code) and suggested monitoring/alerting.
+  Asked the user for scope; chosen: log a clear warning only, no new monitoring
+  infrastructure/scheduled checks/user alerts.
+- `FallbackLLMClient.generateContent` (`lib/llm-client.ts`) now logs one `console.error` summary
+  line when every configured tier is exhausted — `ALL_TIERS_EXHAUSTED (N/N tiers failed):
+  tier1=reason1, tier2=reason2, ...` — instead of leaving that diagnosis to be reconstructed from
+  N separate per-tier `console.warn` lines. New `describeError` helper gives each tier a short
+  reason (HTTP status, `429(daily quota)` for Gemini's specific case from decisions/008, or
+  `network error` for a status-less failure). Doesn't fix the throttle — can't, it's external —
+  just makes an already-existing failure mode `grep`-able. Addendum added to `decisions/008`.
+  2 new tests in `llm-client.test.ts` (summary line content, daily-quota labeling). 368/368
+  tests, typecheck, lint, build all clean.
+- Session note: found mid-task that the working directory had switched to
+  `fix/review-coordinator-idempotency` (an already-merged branch) partway through, likely from
+  an external `git checkout` (IDE or user's own terminal) — not a revert of any prior work, just
+  a reminder these branch switches aren't always visible from here. Confirmed both
+  `fix/github-review-id-overflow` and `fix/billing-private-repo-copy` were untouched and intact
+  before branching this fix fresh off the merged base. Also had to `prisma generate` after
+  switching, since the gitignored generated Prisma client doesn't auto-revert with `git
+  checkout` and briefly had stale BigInt-typed fields left over from the other branch.
+
 ## 2026-09-06 (Fix: review-coordinator.job.ts idempotency — branch `fix/review-coordinator-idempotency`)
 - Fixed the duplicate-`Review`-row bug flagged (not fixed) in the same day's earlier jobId-bug
   entry below. New nullable-unique `Review.coordinatorJobId` column
