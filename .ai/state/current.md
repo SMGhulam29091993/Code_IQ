@@ -1,6 +1,15 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
+## 2026-09-12 (Second fix on the same branch: `ILLMClient` shape, `fix/llm-client-exhaustion-summary-log`)
+A second bot finding on `decisions/008` (same session): `ILLMClient.generateContent`'s return
+type mimicked Gemini's own SDK response object, correctly flagged as too provider-specific.
+Flattened to `Promise<{ text: string }>`; `lib/gemini.ts` gained a real adapter class (was
+previously exempt via structural typing, which was the actual coupling). Declined the finding's
+own suggestion of a generic `LLMResponse<T>` with `.json()`/`.usage()` — no real caller needs it
+yet. Verified live against the real provider chain post-change. 368/368 tests, typecheck, lint,
+build clean. Full detail + reasoning in `state/completed.md` and `decisions/008`'s new addendum.
+
 ## 2026-09-12 (Diagnosability fix, on branch `fix/llm-client-exhaustion-summary-log`)
 Per a `codeiq29091993 Bot` review of `decisions/008` flagging the OpenRouter account-throttle
 gap: added one clear `ALL_TIERS_EXHAUSTED` summary log line to `FallbackLLMClient` when every

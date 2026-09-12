@@ -119,3 +119,40 @@ scoped to logging only, not a monitoring service/scheduled check/user-facing ale
 considered and explicitly declined (user's call) in favor of the smallest change that makes the
 already-existing failure mode grep-able (`grep ALL_TIERS_EXHAUSTED`) instead of needing to
 reconstruct it from scattered per-tier warnings.
+
+## Addendum (2026-09-12): `ILLMClient.generateContent` no longer returns Gemini's own response shape
+
+`codeiq29091993 Bot`'s own review of this ADR's "Adapter" bullet flagged that
+`ILLMClient.generateContent`'s return type, `{ response: { text(): string } }`, is "highly
+specific, potentially limiting flexibility for future LLMs with diverse response shapes" and
+suggested a richer, more abstract response object.
+
+The specificity was real, and not accidental: that shape was chosen originally so `lib/gemini.ts`
+could skip writing an adapter entirely — `geminiModel: ILLMClient = genAI.getGenerativeModel(...)`
+type-checked via plain structural typing, because a real `GenerativeModel`'s `generateContent`
+already returns something matching `{ response: { text() } }`. That convenience *was* the
+coupling the finding correctly identified — the interface was shaped around one provider's SDK,
+not designed independently of it.
+
+**Decision:** flattened `ILLMClient.generateContent` to return a plain `Promise<{ text: string }>`.
+`lib/gemini.ts` now has a real `GeminiClient` adapter class (translating the SDK's
+`result.response.text()` into `{ text: result.response.text() }`), matching `OpenRouterClient`'s
+existing pattern — both providers go through an explicit adapter uniformly now, none exempted by
+a structural-typing shortcut. `GeminiService` reads `result.text` instead of
+`result.response.text()`; no other business logic depends on the shape.
+
+**Explicitly not done:** a generic `LLMResponse<T>` with `.json()`/`.usage()`/similar, as the
+finding's suggestion floated. Nothing in this codebase consumes token-usage or non-text response
+data today (nothing tracks Gemini's or OpenRouter's usage metadata anywhere, despite both APIs
+returning it), so building that out now would be exactly the premature abstraction this
+project's own conventions warn against — an interface designed for hypothetical future callers
+that don't exist yet. The chosen fix addresses the actual defect (coupling to one provider's SDK
+shape) without speculatively growing the interface's surface area. Revisit if/when a real caller
+needs usage data or a non-text response.
+
+**Consequences:** every test file constructing a mock `ILLMClient` response
+(`gemini.service.test.ts`, `llm-client.test.ts`, `openrouter-client.test.ts`) updated from
+`{ response: { text: () => ... } }` to `{ text: ... }`. Verified live against the real provider
+chain post-change (`buildLLMClient()` → `RetryingLLMClient` → `FallbackLLMClient` → adapter),
+confirming the flat shape round-trips correctly end-to-end, not just under mocks. 368/368 tests,
+typecheck, lint, and full build clean.

@@ -484,7 +484,7 @@ reviewDiff(patch, config, filename):
     systemInstruction: systemPrompt,
     contents: [{ role: 'user', parts: [{ text: patch }] }],
   })
-  raw = JSON.parse(result.response.text())
+  raw = JSON.parse(result.text)  // ILLMClient's plain {text} shape, decisions/008's 2026-09-12 addendum
   return ReviewResultSchema.parse(raw)  // throws ZodError on bad output
 ```
 

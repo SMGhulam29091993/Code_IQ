@@ -3,7 +3,7 @@ import { FallbackLLMClient, RetryingLLMClient } from "../lib/llm-client";
 import type { ILLMClient } from "../modules/reviews/review.types";
 
 function mockResponse(text: string) {
-  return { response: { text: () => text } };
+  return { text };
 }
 
 function geminiRateLimitError(retryDelay: string) {
@@ -56,7 +56,7 @@ describe("RetryingLLMClient", () => {
     await vi.advanceTimersByTimeAsync(2500); // Google's suggested delay + the small buffer
 
     const result = await promise;
-    expect(result.response.text()).toBe("ok");
+    expect(result.text).toBe("ok");
     expect(inner.generateContent).toHaveBeenCalledTimes(2);
   });
 
@@ -107,7 +107,7 @@ describe("RetryingLLMClient", () => {
     const promise = client.generateContent({ contents: [] });
     await vi.advanceTimersByTimeAsync(1000); // first backoff step is 1s
 
-    expect((await promise).response.text()).toBe("ok");
+    expect((await promise).text).toBe("ok");
     expect(inner.generateContent).toHaveBeenCalledTimes(2);
   });
 
@@ -141,7 +141,7 @@ describe("FallbackLLMClient", () => {
 
     const result = await chain.generateContent({ contents: [] });
 
-    expect(result.response.text()).toBe("a");
+    expect(result.text).toBe("a");
     expect(second.generateContent).not.toHaveBeenCalled();
   });
 
@@ -157,7 +157,7 @@ describe("FallbackLLMClient", () => {
 
     const result = await chain.generateContent({ contents: [] });
 
-    expect(result.response.text()).toBe("b");
+    expect(result.text).toBe("b");
   });
 
   it("throws the last error when every client fails", async () => {

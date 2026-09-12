@@ -26,19 +26,19 @@ export class LLMClientError extends Error {
   }
 }
 
-// Adapter — translates ILLMClient's Gemini-shaped {systemInstruction, contents} request into
-// OpenRouter's OpenAI-compatible /chat/completions body, and its response back into
-// ILLMClient's {response:{text()}} shape, so GeminiService (and everything above it) never
-// knows OpenRouter exists. One instance per model id; lib/llm-client.ts's buildLLMClient
-// constructs one per entry in OPEN_ROUTER_MODELS. Verified live against the real API
-// 2026-09-06 — response_format: json_object is respected, cost: 0 on the free-tier models.
+// Adapter — translates ILLMClient's {systemInstruction, contents} request into OpenRouter's
+// OpenAI-compatible /chat/completions body, and its response back into ILLMClient's plain
+// {text} shape, so GeminiService (and everything above it) never knows OpenRouter exists. One
+// instance per model id; lib/llm-client.ts's buildLLMClient constructs one per entry in
+// OPEN_ROUTER_MODELS. Verified live against the real API 2026-09-06 — response_format:
+// json_object is respected, cost: 0 on the free-tier models.
 export class OpenRouterClient implements ILLMClient {
   constructor(private readonly model: string) {}
 
   async generateContent(request: {
     systemInstruction?: string;
     contents: Array<{ role: string; parts: Array<{ text: string }> }>;
-  }): Promise<{ response: { text(): string } }> {
+  }): Promise<{ text: string }> {
     const messages = [
       ...(request.systemInstruction
         ? [{ role: "system", content: request.systemInstruction }]
@@ -89,6 +89,6 @@ export class OpenRouterClient implements ILLMClient {
         null
       );
     }
-    return { response: { text: () => text } };
+    return { text };
   }
 }

@@ -44,7 +44,7 @@ describe("OpenRouterClient", () => {
     ]);
   });
 
-  it("returns the message content as response.text()", async () => {
+  it("returns the message content as text", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({ choices: [{ message: { content: '{"issues":[]}' } }] })
     );
@@ -52,7 +52,7 @@ describe("OpenRouterClient", () => {
 
     const result = await client.generateContent({ contents: [] });
 
-    expect(result.response.text()).toBe('{"issues":[]}');
+    expect(result.text).toBe('{"issues":[]}');
   });
 
   it("omits the system message when systemInstruction is not given", async () => {
