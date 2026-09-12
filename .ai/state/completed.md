@@ -1,6 +1,26 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-09-12 (Fix: misleading "unlock private repositories" billing copy)
+- User asked "can we add private repos for review" — investigation found private-repo access
+  has never actually been restricted anywhere in this codebase: `Repo` has no `isPrivate` field
+  at all, and `repo.service.ts`'s only FREE-tier gate (`FREE_TIER_ACTIVE_REPO_LIMIT`) checks
+  *count* (3 active repos), never visibility. The Billing screen's FREE-tier empty state,
+  inherited verbatim from the original Claude Design mockup, claimed "Add a card to move to Pro
+  or Team and unlock private repositories" — a promise nothing in the backend ever enforced, and
+  a gap not previously flagged in `state/blockers.md` alongside the other three known
+  mockup-vs-reality gaps.
+- Explicit product decision (user's call, offered as an option alongside "actually build the
+  restriction"): fix the copy to match reality rather than retroactively restrict private repos
+  no one had reason to expect were ever blocked. New copy uses the plan table's real
+  differentiators (`knowledge/domains/billing.md` — 3 repos/50 reviews on FREE vs. unlimited on
+  Pro/Team): *"`{accountLogin}` is on the free tier (up to 3 repos, 50 reviews/month). Add a card
+  to move to Pro or Team for unlimited repos and reviews."* Updated in
+  `apps/web/components/billing/BillingContent.tsx` and `knowledge/screens/billing-screens.md`
+  (the only two places the old claim appeared — confirmed via a full-repo search). No test
+  asserted the old exact string, so nothing broke; typecheck/lint/`pnpm --filter @codeiq/web
+  test` (96/96) all clean.
+
 ## 2026-09-12 (Milestone + fix: first-ever real successful review, then a real bug fixed — branch `fix/github-review-id-overflow`)
 - The `fix/review-coordinator-idempotency` PR (#9) got merged, which itself triggered a real
   webhook review of that same PR. Found `RUNNING` since 2026-09-06 (6 days) when checked —

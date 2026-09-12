@@ -78,7 +78,7 @@ BillingPage:
 ### Edge cases
 | Case | Behaviour |
 |------|-----------|
-| On Free tier (no subscription) | `GET /billing/subscription` returns 200 with `planTier: 'FREE'` → page shows the mockup's own empty state: "No subscription yet" / *"`{accountLogin}` is on the free tier. Add a card to move to Pro or Team and unlock private repositories."* / CTA "Choose a plan" (scrolls to PlanCards) |
+| On Free tier (no subscription) | `GET /billing/subscription` returns 200 with `planTier: 'FREE'` → page shows the mockup's own empty state: "No subscription yet" / *"`{accountLogin}` is on the free tier (up to 3 repos, 50 reviews/month). Add a card to move to Pro or Team for unlimited repos and reviews."* / CTA "Choose a plan" (scrolls to PlanCards). Copy corrected 2026-09-12 — the original mockup's "unlock private repositories" claim was never true: private-repo access has never been restricted by plan tier anywhere in this codebase (`Repo` has no `isPrivate` field at all), only repo *count* (3) and review *count* (50/mo) are enforced (`repo.service.ts`'s `FREE_TIER_ACTIVE_REPO_LIMIT`). Explicit product decision: fix the copy to match reality rather than build the restriction the copy implied. |
 | `POST /billing/checkout` returns 400 (already subscribed) | Toast: "You already have an active subscription. Use 'Manage' to change your plan." |
 | `POST /billing/portal` returns 400 (no subscription) | Toast: "No active subscription found." |
 | Stripe checkout returns `?success=true` | Green success banner |

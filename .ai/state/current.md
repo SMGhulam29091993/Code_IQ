@@ -1,6 +1,16 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
+## 2026-09-12 (Fix: misleading billing copy, on branch `fix/billing-private-repo-copy`)
+User asked whether private repos can be added for review — investigation found they always
+could; nothing in the codebase has ever restricted repo activation by visibility (`Repo` has no
+`isPrivate` field, FREE tier only gates on *count*). The Billing screen's empty state claimed
+otherwise ("unlock private repositories" on Pro/Team), inherited unchanged from the original
+mockup. Product decision: fix the copy to reflect real plan differentiators (repo/review count
+limits) rather than build a restriction nobody expected. Full detail in `state/completed.md`.
+Committed on a fresh branch (distinct, unrelated fix from the githubReviewId bug below); not yet
+merged.
+
 ## 2026-09-12 (Milestone + fix, on branch `fix/github-review-id-overflow`)
 The `fix/review-coordinator-idempotency` PR merged and its own triggered review became this
 pipeline's **first-ever genuine success** — a real comment posted to GitHub PR #9 via the
