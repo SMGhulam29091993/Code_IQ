@@ -109,10 +109,12 @@ export class ReviewService implements IReviewService {
           },
           opts: {
             // A new jobId per retry generation — the chunk's original jobId
-            // (`${reviewId}:${chunk.id}`) is already DONE/terminal in BullMQ and needs a fresh
+            // (`${reviewId}-${chunk.id}`) is already DONE/terminal in BullMQ and needs a fresh
             // id to run again. `attempts` (already incremented by every prior run of this
             // chunk) makes each retry generation's id unique even across repeated retries.
-            jobId: `${reviewId}:${chunk.id}:retry${chunk.attempts}`,
+            // `-`, not `:` — see review-coordinator.job.ts's jobId comment (found live
+            // 2026-09-06: this BullMQ version rejects a custom jobId containing `:`).
+            jobId: `${reviewId}-${chunk.id}-retry${chunk.attempts}`,
             priority,
             attempts: 3,
             backoff: { type: "exponential", delay: 2000 },

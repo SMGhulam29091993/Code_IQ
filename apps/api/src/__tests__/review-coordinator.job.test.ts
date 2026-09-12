@@ -35,6 +35,7 @@ const DEFAULT_CONFIG: SanitizedRepoConfig = {
 
 function buildJob(overrides: Partial<ReviewCoordinatorJobData> = {}): Job<ReviewCoordinatorJobData> {
   return {
+    id: "coordinator-job-1",
     data: {
       installationId: "install-1",
       repoId: "repo-1",
@@ -63,6 +64,7 @@ function buildReview(overrides: Partial<Review> = {}): Review {
     totalChunks: 0,
     completedChunks: 0,
     truncated: false,
+    coordinatorJobId: null,
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,
@@ -91,6 +93,7 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
     reviewRepo = {
       findManyForUser: vi.fn(),
       findById: vi.fn(),
+      findByCoordinatorJobId: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue(buildReview()),
       update: vi.fn().mockResolvedValue(buildReview({ status: "DONE" })),
       countForUser: vi.fn(),
@@ -164,7 +167,64 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
       prTitle: "Add feature",
       prAuthor: "octocat",
       headSha: "sha123",
+      coordinatorJobId: "coordinator-job-1",
     });
+  });
+
+  // BullMQ retries a failed coordinator job under the exact same job.id (jobs/worker.ts's
+  // attempts: 3) — found live 2026-09-06 that this created a duplicate Review row per retry
+  // attempt (memory/pitfalls.md #016's follow-up). These three tests cover the fix.
+  it("reuses the existing Review row when one already exists for this job id (BullMQ retry)", async () => {
+    const existing = buildReview({ id: "existing-review", coordinatorJobId: "coordinator-job-1" });
+    vi.mocked(reviewRepo.findByCoordinatorJobId).mockResolvedValue(existing);
+    vi.mocked(reviewRepo.update).mockResolvedValue(existing);
+    vi.mocked(reviewChunkRepo.findByReviewId).mockResolvedValue([]);
+
+    await processor.process(buildJob());
+
+    expect(reviewRepo.findByCoordinatorJobId).toHaveBeenCalledWith("coordinator-job-1");
+    expect(reviewRepo.create).not.toHaveBeenCalled();
+    expect(reviewRepo.update).toHaveBeenCalledWith("existing-review", { status: "RUNNING" });
+  });
+
+  it("reuses already-persisted chunks from an earlier attempt instead of re-fetching the diff", async () => {
+    const existing = buildReview({ id: "existing-review", coordinatorJobId: "coordinator-job-1" });
+    const existingChunks: ReviewChunkRow[] = [
+      {
+        id: "chunk-from-earlier-attempt",
+        reviewId: "existing-review",
+        filename: "src/index.ts",
+        patch: "@@ -1 +1 @@",
+        chunkIndex: 0,
+        status: "PENDING",
+        attempts: 0,
+      },
+    ];
+    vi.mocked(reviewRepo.findByCoordinatorJobId).mockResolvedValue(existing);
+    vi.mocked(reviewRepo.update).mockResolvedValue(existing);
+    vi.mocked(reviewChunkRepo.findByReviewId).mockResolvedValue(existingChunks);
+
+    await processor.process(buildJob());
+
+    expect(fakeOctokit.pulls.listFiles).not.toHaveBeenCalled();
+    expect(reviewChunkRepo.createMany).not.toHaveBeenCalled();
+    expect(flowProducer.add).toHaveBeenCalledWith(
+      expect.objectContaining({
+        children: [expect.objectContaining({ data: expect.objectContaining({ chunkId: "chunk-from-earlier-attempt" }) })],
+      })
+    );
+  });
+
+  it("still fetches and chunks the diff on a reused review with no persisted chunks yet", async () => {
+    const existing = buildReview({ id: "existing-review", coordinatorJobId: "coordinator-job-1" });
+    vi.mocked(reviewRepo.findByCoordinatorJobId).mockResolvedValue(existing);
+    vi.mocked(reviewRepo.update).mockResolvedValue(existing);
+    vi.mocked(reviewChunkRepo.findByReviewId).mockResolvedValue([]);
+
+    await processor.process(buildJob());
+
+    expect(fakeOctokit.pulls.listFiles).toHaveBeenCalled();
+    expect(reviewChunkRepo.createMany).toHaveBeenCalledWith("existing-review", expect.any(Array));
   });
 
   it("marks review FAILED when the installation is not found", async () => {
@@ -243,7 +303,7 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
             repoConfig: DEFAULT_CONFIG,
           },
           opts: {
-            jobId: "review-1:chunk-1",
+            jobId: "review-1-chunk-1",
             priority: 1,
             attempts: 3,
             backoff: { type: "exponential", delay: 2000 },

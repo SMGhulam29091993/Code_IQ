@@ -8,6 +8,7 @@ import type {
   IFairnessService,
   IReviewChunkRepository,
   IReviewRepository,
+  ReviewChunkRow,
   ReviewCoordinatorJobData,
 } from "../modules/reviews/review.types";
 
@@ -42,12 +43,33 @@ export class ReviewCoordinatorJobProcessor {
       job.data;
 
     // 1. Create the Review row (status: RUNNING) — ReviewRepository.create hardcodes RUNNING.
-    const review = await this.reviewRepo.create({ repoId, prNumber, prTitle, prAuthor, headSha });
+    //
+    // Idempotency: this job's BullMQ id never changes across BullMQ's own retries of it
+    // (`attempts: 3`, jobs/worker.ts's default coordinator options) — a failed attempt gets
+    // retried under the exact same job.id, not a new one. Without this check, every retry would
+    // call reviewRepo.create again and leave a duplicate Review row per attempt — found live
+    // 2026-09-06 running a real coordinator job for the first time (memory/pitfalls.md #016's
+    // follow-up; three duplicate rows for the same PR/headSha were observed from exactly this).
+    // job.id is always set: webhook.service.ts passes the GitHub delivery id as jobId, and
+    // BullMQ generates one itself when the caller doesn't.
+    const jobId = job.id!;
+    const existingReview = await this.reviewRepo.findByCoordinatorJobId(jobId);
+    const review = existingReview
+      ? await this.reviewRepo.update(existingReview.id, { status: "RUNNING" })
+      : await this.reviewRepo.create({
+          repoId,
+          prNumber,
+          prTitle,
+          prAuthor,
+          headSha,
+          coordinatorJobId: jobId,
+        });
 
     try {
       // 2-3. Installation-scoped Octokit + effective repo config, resolved once and threaded
       // through every chunk job's data (see resolve-review-context.ts) rather than re-fetched
-      // per chunk.
+      // per chunk. Cheap enough to redo unconditionally even when reusing an earlier attempt's
+      // chunks below — it never hits the PR diff itself.
       const { octokit, owner, repo, repoConfig } = await resolveReviewContext(
         repoId,
         repoFullName,
@@ -56,35 +78,53 @@ export class ReviewCoordinatorJobProcessor {
         this.configService
       );
 
-      // 4. Fetch PR diff
-      const { data: files } = await octokit.pulls.listFiles({
-        owner,
-        repo,
-        pull_number: prNumber,
-      });
+      // An earlier attempt of this same job (existingReview above) may have already fetched,
+      // chunked, and persisted ReviewChunk rows before failing — e.g. exactly the `:` jobId bug
+      // this file used to have, which failed at flowProducer.add *after* chunks were already
+      // written. Reuse them instead of re-fetching the diff and re-chunking, which would create
+      // a second, duplicate set of ReviewChunk rows (and duplicate review-chunk jobs) for the
+      // same review.
+      const existingChunks = existingReview
+        ? await this.reviewChunkRepo.findByReviewId(existingReview.id)
+        : [];
 
-      // 5. Filter files by ignore patterns and config
-      const filesToReview = this.diffService.filterFiles(files, repoConfig);
-      if (filesToReview.length === 0) {
-        await this.reviewRepo.update(review.id, {
-          status: "DONE",
-          summary: "No reviewable files in this PR.",
-          filesReviewed: 0,
+      let chunkRows: ReviewChunkRow[];
+      let truncated = review.truncated;
+
+      if (existingChunks.length > 0) {
+        chunkRows = existingChunks;
+      } else {
+        // 4. Fetch PR diff
+        const { data: files } = await octokit.pulls.listFiles({
+          owner,
+          repo,
+          pull_number: prNumber,
         });
-        return;
+
+        // 5. Filter files by ignore patterns and config
+        const filesToReview = this.diffService.filterFiles(files, repoConfig);
+        if (filesToReview.length === 0) {
+          await this.reviewRepo.update(review.id, {
+            status: "DONE",
+            summary: "No reviewable files in this PR.",
+            filesReviewed: 0,
+          });
+          return;
+        }
+
+        // 6. Chunk the largest diffs first (diffService.prioritizeFiles) and persist a
+        // ReviewChunk row (PENDING) per chunk *before* fanning out — a crash between here and
+        // the flowProducer.add below leaves chunks a retry can still discover and reuse (above).
+        // Truncate to MAX_CHUNKS_PER_REVIEW if the PR produced more chunks than that.
+        let chunks = this.diffService.chunkFiles(this.diffService.prioritizeFiles(filesToReview));
+        truncated = false;
+        if (chunks.length > MAX_CHUNKS_PER_REVIEW) {
+          chunks = chunks.slice(0, MAX_CHUNKS_PER_REVIEW);
+          truncated = true;
+        }
+        chunkRows = await this.reviewChunkRepo.createMany(review.id, chunks);
       }
 
-      // 6. Chunk the largest diffs first (diffService.prioritizeFiles) and persist a ReviewChunk
-      // row (PENDING) per chunk *before* fanning out — a crash between here and the
-      // flowProducer.add below leaves chunks a retry can still discover via findIncomplete.
-      // Truncate to MAX_CHUNKS_PER_REVIEW if the PR produced more chunks than that.
-      let chunks = this.diffService.chunkFiles(this.diffService.prioritizeFiles(filesToReview));
-      let truncated = false;
-      if (chunks.length > MAX_CHUNKS_PER_REVIEW) {
-        chunks = chunks.slice(0, MAX_CHUNKS_PER_REVIEW);
-        truncated = true;
-      }
-      const chunkRows = await this.reviewChunkRepo.createMany(review.id, chunks);
       await this.reviewRepo.update(review.id, { totalChunks: chunkRows.length, truncated });
 
       // Per-installation fairness (decisions/007 Phase 4): an installation with many chunks
@@ -112,7 +152,12 @@ export class ReviewCoordinatorJobProcessor {
             repoConfig,
           },
           opts: {
-            jobId: `${review.id}:${row.id}`,
+            // Not `${review.id}:${row.id}` — found live 2026-09-06 running a real coordinator
+            // job against real Redis/BullMQ: this installed BullMQ version (5.80.8, inside the
+            // `^5.21.0` range package.json pins) rejects any custom jobId containing `:` with
+            // "Custom Id cannot contain :", something no unit/integration test caught since
+            // they all mock FlowProducer entirely. `-` is safe — cuids never contain it.
+            jobId: `${review.id}-${row.id}`,
             priority,
             attempts: 3,
             backoff: { type: "exponential", delay: 2000 },

@@ -1,6 +1,144 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-09-06 (Fix: review-coordinator.job.ts idempotency — branch `fix/review-coordinator-idempotency`)
+- Fixed the duplicate-`Review`-row bug flagged (not fixed) in the same day's earlier jobId-bug
+  entry below. New nullable-unique `Review.coordinatorJobId` column
+  (`packages/db/prisma/schema.prisma`, migration `20260906132531_add_review_coordinator_job_id`
+  — generated non-interactively via `prisma migrate diff --from-config-datasource` since
+  `prisma migrate dev` requires a TTY this environment doesn't have, then applied with
+  `prisma migrate deploy`) stores the BullMQ `review-coordinator-queue` job's own id (== the
+  GitHub webhook delivery id when present) at `Review` creation time.
+  `review-coordinator.job.ts`'s `process()` now looks up an existing `Review` by that job id
+  first — reusing it (reset to `RUNNING`) instead of calling `create` again when BullMQ retries
+  the same job (`attempts: 3`, same job.id every attempt, never a new one). Deliberately keyed
+  on the job's own identity rather than an approximate repo+prNumber+headSha lookup, which would
+  have wrongly treated a genuine intentional re-review of the identical commit (e.g. this same
+  session's manual synthetic-webhook retries) as "resume the stale one" instead of a fresh run.
+  Also reuses already-persisted `ReviewChunk` rows when a reused review already has some
+  (meaning an earlier attempt got past chunking before failing, exactly what the `:` jobId bug
+  caused) instead of re-fetching the diff and re-chunking, which would otherwise create a
+  second, duplicate chunk set on the *same* review.
+  `IReviewRepository` gained `findByCoordinatorJobId`; `CreateReviewInput` gained an optional
+  `coordinatorJobId` field. 3 new tests in `review-coordinator.job.test.ts` cover all three
+  paths (fresh job / retried job with no chunks yet / retried job with chunks already
+  persisted); updated 5 existing test files' `IReviewRepository` mocks and 2 `buildReview`
+  fixtures for the new field. `pnpm --filter @codeiq/api test` (366/366), typecheck, lint, and
+  `pnpm --filter @codeiq/db build && pnpm --filter @codeiq/api build` all clean.
+  `.ai/plans/database.md` (schema doc, per schema.prisma's own "update in the same change"
+  instruction) and `knowledge/technical/backend/review-pipeline-scaling.md`'s "First real-world
+  run" section updated to mark this fixed rather than flagged.
+
+## 2026-09-06 (Critical fix: Step 8's chunk-fanout pipeline was completely broken for real reviews)
+- Per explicit user request, rebuilt the 11-day-stale `api`/`web` Docker containers to pick up
+  Step 8's chunk-fanout pipeline, today's billing/account-tabs fixes, and the OpenRouter fallback
+  chain — the first time any of that ever ran against real Redis/BullMQ, not mocks.
+- Immediately found: **every real, webhook-triggered review crashed** with `Error: Custom Id
+  cannot contain :`, thrown from BullMQ's `FlowProducer` — `review-coordinator.job.ts` and
+  `review.service.ts`'s `retryReview` both build child job IDs as `${review.id}:${row.id}`-style
+  strings, and the installed BullMQ version (5.80.8, inside the `^5.21.0` range `package.json`
+  pins) now rejects any custom jobId containing `:`. Invisible to all 342+ existing unit/
+  integration tests since they mock `FlowProducer` entirely — this had been silently broken
+  since Step 8 shipped 2026-08-30, just never exercised for real until today's rebuild. Fixed:
+  both job-ID templates changed to use `-` instead of `:` (cuids never contain either
+  character); updated the 3 test files that had hardcoded the old `:`-containing string as an
+  exact-match assertion (`review-coordinator.job.test.ts`, `review.service.test.ts`,
+  `review.routes.test.ts`). Full writeup in `memory/pitfalls.md` #016 and
+  `knowledge/technical/backend/review-pipeline-scaling.md`'s new "First real-world run" section.
+  `pnpm --filter @codeiq/api test` (363/363), typecheck, lint all clean; rebuilt and
+  redeployed the `api` container with the fix, confirmed via `docker exec` that the compiled
+  job files contain the new hyphenated IDs.
+- Also found while diagnosing (flagged, not fixed — lower priority): the coordinator job's own
+  BullMQ-level retry (`attempts: 3`) re-runs `process()` from scratch each attempt, and
+  `process()` unconditionally creates a **new** `Review` row every time — so the `:`-bug crash
+  (which happened *after* chunks were persisted but *before* the Flow succeeded) left 3
+  duplicate `Review`+`ReviewChunk` sets for the same PR/headSha, one per BullMQ retry attempt.
+  Not a correctness bug (each is independently valid, just orphaned/failed), but worth a real
+  idempotency check eventually.
+- Investigated "what about the previous reviews" (7 real `FAILED` reviews from today's Gemini
+  quota exhaustion, 2 permanently orphaned `RUNNING` reviews from 2026-08-25, plus a third
+  `RUNNING` row that turned out to belong to a different, likely-seed-fixture installation and
+  was left untouched): the 2 real orphans manually marked `FAILED` in the DB (user's explicit
+  choice) with an explanatory `summary` field, since they predate the `ReviewChunk` schema and
+  the resumable-retry endpoint can't resume them. The 7 real `FAILED` reviews were **not** safe
+  to retry via the standard `POST /reviews/:reviewId/retry` endpoint — caught before doing it:
+  since they have zero persisted `ReviewChunk` rows (pre-Step-8 pipeline), retrying them would
+  create a Flow with zero children, and `ReviewFinalizeJobProcessor`'s "all chunks failed →
+  FAILED" guard only fires when `allChunks.length > 0` — with zero chunks it would silently
+  summarize zero issues as a clean review and **post a false "no issues found" comment to the
+  real GitHub PR**. Instead (user's explicit choice, "trigger fresh coordinator runs"): sent one
+  synthetic `pull_request synchronize` webhook (proper HMAC signature via
+  `GITHUB_WEBHOOK_SECRET`) for PR #8's actual current head (confirmed live via the GitHub App's
+  own Octokit — `bf2408eded7b00a0a9f0e3e0105672189f912954`), the same PR all 7 failed reviews
+  and both orphans were for. This is what surfaced the `:` jobId bug in the first place (first
+  attempt, before the rebuild picked up the fix — three duplicate Review rows from that
+  attempt's BullMQ retries, see above); a second attempt after rebuilding produced a real,
+  genuinely-chunked (30 real `ReviewChunk` rows) review that exercised the full
+  Gemini→OpenRouter fallback chain end-to-end against real infrastructure.
+- That real run's outcome: still failing per-chunk, because **both providers were still
+  exhausted** — Gemini's daily quota hadn't cleared (confirmed live, well past the assumed
+  midnight-Pacific reset), and the OpenRouter account-level throttle flagged in this session's
+  earlier `decisions/008` entry was still in effect (identical `"messages.0.content: Invalid
+  input"` 400 across every configured model). This is the *correct, safe* outcome given both
+  providers being down — `ReviewFinalizeJobProcessor`'s guard correctly fires once real chunks
+  exist, so it settles as `FAILED` rather than posting a false report. Confirms the OpenRouter
+  $10-credit recommendation from `decisions/008`/`state/next.md` item 9 is still the real
+  remaining blocker for reviews actually succeeding, not a code defect.
+
+## 2026-09-06 (New: OpenRouter multi-model fallback for the review pipeline — decisions/008)
+- Root cause of "every review today failed" traced to a quota nobody had noticed: Gemini
+  2.5 Flash's free tier caps at **20 requests/day** (`GenerateRequestsPerDayPerProjectPerModel-
+  FreeTier`), separate from the requests-per-minute quota already handled 2026-08-26. Real usage
+  this session (several real PRs reviewed) exhausted it; 7 real `Review` rows show
+  `status: FAILED` with the exact quota error. Also found while investigating: 2 `Review` rows
+  from 2026-08-25 permanently stuck `RUNNING` (the interrupted-session reviews already flagged in
+  `state/current.md`, orphaned when their worker died with the container — unrelated to today's
+  quota issue, not fixed this session) and the live Docker containers were running code from
+  2026-08-26, 11 days stale (missing all of Step 8 and everything from today) — also not
+  rebuilt this session per explicit user choice ("not yet").
+- Built per explicit user request, after discussing NVIDIA Nemotron and OpenRouter as
+  alternatives: a proper multi-model fallback chain, not a one-line provider swap. Full design
+  in `decisions/008` — summary: `ILLMClient` (renamed from `IGeminiClient`, `review.types.ts`)
+  is the seam; `lib/gemini.ts`'s existing client and the new `lib/openrouter.ts`'s
+  `OpenRouterClient` (Adapter) both implement it; `lib/llm-client.ts`'s `RetryingLLMClient`
+  (Decorator — retry-with-backoff, moved out of `GeminiService`) wraps each, and
+  `FallbackLLMClient` (Composite/Chain of Responsibility) tries Gemini first then each
+  `OPEN_ROUTER_MODELS` entry in order; `buildLLMClient()` (Factory) composes it all, wired into
+  `container.ts` in place of the direct `geminiModel` import. `GeminiService` itself got
+  *simpler* — it lost its own retry loop entirely.
+- Live-testing this file against the real Gemini and OpenRouter APIs (not just mocks) surfaced
+  two real bugs no amount of mock-based testing would have caught, both fixed and covered by new
+  tests before considering this done:
+  1. A naive "429 = retry" rule wasted minutes retrying Gemini's *daily* quota error with
+     Google's suggested per-attempt delay before ever reaching OpenRouter — a daily cap doesn't
+     clear in under a minute regardless of what delay Google suggests. Fixed:
+     `isRetryableError` special-cases a `quotaId` containing `"PerDay"` as non-retryable.
+  2. OpenRouter's free models run on unreserved shared capacity — the *exact same* request
+     against the *exact same* model returned a proper 429 one moment and a misleading 400
+     `"messages.0.content: Invalid input"` the next, purely from upstream congestion. Fixed:
+     `OpenRouterClient`'s `LLMClientError` carries its own `retryable` flag (true unless
+     401/403) rather than leaving classification to a generic status-code check.
+  Also found live: this OpenRouter key has zero lifetime spend (`usage: 0` on `GET /api/v1/key`)
+  and, after roughly 30 test requests in 15 minutes, started returning that same generic 400
+  across *every* configured model simultaneously — consistent with OpenRouter's documented low
+  default request ceiling for free accounts that have never purchased credit. This is an
+  account-level throttle, invisible to the per-model fallback logic (every tier fails together).
+  Recommended fix (not done — billing action, user's call): a one-time $10 OpenRouter credit
+  purchase, which OpenRouter ties to a meaningfully higher free-tier ceiling.
+  Default `OPEN_ROUTER_MODELS` (5 models) chosen from a live snapshot of
+  `openrouter.ai/api/v1/models`'s free tier and verified individually to return real parseable
+  JSON under `response_format: json_object` — swapped once already after the first 3 picks
+  turned out to be under heavy contemporaneous shared-pool load (confirmed by testing other free
+  models successfully at the same moment).
+- New: `apps/api/src/lib/openrouter.ts`, `apps/api/src/lib/llm-client.ts`,
+  `apps/api/src/__tests__/openrouter-client.test.ts`, `apps/api/src/__tests__/llm-client.test.ts`
+  (migrated the existing Gemini retry-on-429 tests here from `gemini.service.test.ts`, plus new
+  fallback/daily-quota/OpenRouter-retryable-classification tests). Env: `OPEN_ROUTER_API_KEY`
+  (required), `OPEN_ROUTER_MODELS` (optional, has a default) added to `env.ts`/`.env.example`/
+  `vitest.setup.ts`. `pnpm --filter @codeiq/api test` (363/363), typecheck, and lint all clean.
+  `knowledge/domains/review.md`, `knowledge/technical/backend/architecture.md`, and
+  `decisions/008` updated/created.
+
 ## 2026-09-06 (New: automated GitHub App slug drift check)
 - `codeiq29091993 Bot`'s own review of the 2026-08-25 slug-drift incident (see that entry in
   this file) suggested "regularly verify GitHub App configuration... implement automated

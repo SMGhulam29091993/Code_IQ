@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { env } from "./env";
-import type { IGeminiClient } from "../modules/reviews/review.types";
+import type { ILLMClient } from "../modules/reviews/review.types";
 
 // Gemini 2.5 Flash — .ai/knowledge/technical/backend/architecture.md "AI model". Originally
 // gemini-1.5-pro (ADR-era choice); Google fully retired that model (confirmed 2026-08-26 via
@@ -11,9 +11,11 @@ import type { IGeminiClient } from "../modules/reviews/review.types";
 // enabled and Pro-tier quality is wanted instead.
 const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
 
-// Typed against IGeminiClient (not the SDK's own GenerativeModel type) so GeminiService only
-// ever depends on the narrow interface it actually calls — see review.types.ts.
-export const geminiModel: IGeminiClient = genAI.getGenerativeModel({
+// Typed against ILLMClient (not the SDK's own GenerativeModel type) so GeminiService only ever
+// depends on the narrow interface it actually calls — see review.types.ts. Consumed by
+// lib/llm-client.ts, which wraps it in retry-with-backoff and puts it first in the multi-model
+// fallback chain (decisions/008) — never imported directly by GeminiService itself anymore.
+export const geminiModel: ILLMClient = genAI.getGenerativeModel({
   model: "gemini-2.5-flash",
   generationConfig: { responseMimeType: "application/json" },
 });

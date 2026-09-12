@@ -49,6 +49,7 @@ function buildReview(overrides: Partial<Review> = {}): Review {
     totalChunks: 0,
     completedChunks: 0,
     truncated: false,
+    coordinatorJobId: null,
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,
@@ -108,6 +109,7 @@ describe("ReviewService", () => {
     reviewRepo = {
       findManyForUser: vi.fn(),
       findById: vi.fn(),
+      findByCoordinatorJobId: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
       countForUser: vi.fn(),
@@ -325,7 +327,7 @@ describe("ReviewService", () => {
               filename: "a.ts",
             }),
             opts: expect.objectContaining({
-              jobId: "review-1:chunk-1:retry1",
+              jobId: "review-1-chunk-1-retry1",
               priority: 1,
               failParentOnFailure: false,
             }),

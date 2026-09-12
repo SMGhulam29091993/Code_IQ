@@ -18,7 +18,26 @@
 7. Email-change flow and "log out other sessions on password change" — both explicitly flagged
    as gaps in `knowledge/domains/auth.md`'s `PATCH /auth/me` and `POST /auth/change-password`
    sections, not built this pass
-8. Add `APP_GITHUB_ID` / `APP_GITHUB_PRIVATE_KEY` repo secrets (Settings → Secrets and variables
-   → Actions) so `.github/workflows/verify-github-app-slug.yml` can actually run — this session
-   had no access to add them. See `knowledge/domains/github-app.md`'s "Automated drift check"
-   note for values/encoding (same base64-PEM as `apps/api/.env`'s `GITHUB_APP_PRIVATE_KEY`).
+8. ~~Add `APP_GITHUB_ID` / `APP_GITHUB_PRIVATE_KEY` repo secrets~~ — done (2026-09-06), workflow
+   confirmed green on a real Actions run. See `knowledge/domains/github-app.md`'s "Automated
+   drift check" note.
+9. Purchase a one-time $10 OpenRouter credit (openrouter.ai/settings/credits) — this key has
+   zero lifetime spend and hit what looks like an account-level free-tier request ceiling
+   during `decisions/008`'s live-testing (every configured model failing identically at once,
+   not per-model shared-pool congestion). OpenRouter ties a meaningfully higher free-tier
+   ceiling to a one-time credit purchase rather than ongoing spend. Billing action — user's call.
+10. ~~Manually mark the 2 permanently `RUNNING` reviews from 2026-08-25 as `FAILED`~~ — done
+    (2026-09-06), user's explicit choice. See `state/completed.md`.
+11. ~~Rebuild the `api`/`web` Docker containers~~ — done (2026-09-06), user's explicit choice
+    (reversed the earlier "not yet"). This is what surfaced item 12 below.
+12. ~~Add a real idempotency check to `review-coordinator.job.ts`~~ — done (2026-09-06) on
+    `fix/review-coordinator-idempotency`: new `Review.coordinatorJobId` column (migration
+    `20260906132531_add_review_coordinator_job_id`), reused across BullMQ retries of the same
+    job, chunks reused too if already persisted. See `state/completed.md` and
+    `knowledge/technical/backend/review-pipeline-scaling.md`'s "First real-world run" section.
+    Not yet merged to `feat/auth-screens`/`Dev`.
+13. Once the OpenRouter credit (item 9) or Gemini's daily quota clears, re-verify a review can
+    reach real `DONE` end-to-end (post a real GitHub comment) — the 2026-09-06 rebuild proved
+    the pipeline mechanically works (real chunking, real fallback chain, correct FAILED-not-
+    false-positive behavior) but every provider was still exhausted throughout testing, so a
+    genuine success has still never been observed against a real PR review.

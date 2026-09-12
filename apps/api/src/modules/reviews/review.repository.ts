@@ -36,6 +36,10 @@ export class ReviewRepository implements IReviewRepository {
     });
   }
 
+  findByCoordinatorJobId(coordinatorJobId: string) {
+    return prisma.review.findUnique({ where: { coordinatorJobId } });
+  }
+
   create(input: CreateReviewInput) {
     return prisma.review.create({
       data: { ...input, status: "RUNNING" },

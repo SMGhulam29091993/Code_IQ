@@ -47,6 +47,7 @@ describe("ReviewChunkJobProcessor.process", () => {
     reviewRepo = {
       findManyForUser: vi.fn(),
       findById: vi.fn(),
+      findByCoordinatorJobId: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
       countForUser: vi.fn(),

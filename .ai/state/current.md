@@ -1,6 +1,47 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
+## 2026-09-06 (Fix: review-coordinator.job.ts idempotency, on branch `fix/review-coordinator-idempotency`)
+The duplicate-`Review`-row bug flagged in the jobId-bug entry below is now fixed on its own
+branch (cut from `feat/auth-screens` at commit `cc9d084`, since the fix touches the same file
+the jobId fix already changed): `Review.coordinatorJobId` (new column + migration) lets
+`review-coordinator.job.ts` recognize a BullMQ retry of the same job and reuse the existing
+`Review`/`ReviewChunk` rows instead of creating duplicates. 3 new tests, 366/366 passing,
+typecheck/lint/build all clean. Full detail in `state/completed.md`. Committed (`60bb1d9`) on
+that branch; **not yet merged into `feat/auth-screens`/`Dev`** — see "Working branch" below.
+
+## 2026-09-06 (Critical fix: Step 8 pipeline was completely broken for real reviews)
+Rebuilt the 11-day-stale containers (user's explicit go-ahead, reversing the earlier "not yet")
+and immediately found Step 8's entire chunk-fanout pipeline had never actually worked against
+real Redis/BullMQ: a `:` character in BullMQ job IDs is rejected by the installed BullMQ version,
+invisible to all mocked tests. Fixed (`memory/pitfalls.md` #016). Also handled the two orphaned
+`RUNNING` reviews from 2026-08-25 (marked `FAILED` in DB) and confirmed — before doing anything
+irreversible — that the standard retry endpoint would have posted a **false "no issues" comment
+to the real GitHub PR** for today's 7 real failed reviews, since they predate the ReviewChunk
+schema. Triggered one real fresh review instead (synthetic webhook, proper HMAC signature) for
+PR #8's actual current head, which is what surfaced the jobId bug. After the fix + rebuild, a
+second attempt genuinely chunked the real diff (30 chunks) and exercised the full Gemini→
+OpenRouter fallback end-to-end — settled `FAILED` because both providers are still exhausted
+(safe, correct outcome; no false report posted). Full detail in `state/completed.md`.
+
+## 2026-09-06 (New: OpenRouter multi-model fallback — decisions/008)
+Root cause of "PRs failing today" traced to Gemini's undocumented 20-requests/day free-tier
+quota (separate from the per-minute quota already handled). Built a proper multi-model fallback
+chain rather than a one-line swap: `ILLMClient` (renamed from `IGeminiClient`) is the seam,
+`lib/gemini.ts` + new `lib/openrouter.ts` (Adapters) implement it, `lib/llm-client.ts`'s
+`RetryingLLMClient` (Decorator) + `FallbackLLMClient` (Composite) compose Gemini-then-5-
+OpenRouter-models into one client wired into `container.ts`. Full design, and two real bugs
+found live-testing against the real APIs (a daily-quota 429 wrongly treated as retryable; an
+OpenRouter free-tier 400 that's actually a mislabeled capacity error), in `decisions/008` and
+`state/completed.md`'s entry. **Known open item, not this session's to fix**: the OpenRouter key
+has zero lifetime spend and hit what looks like an account-level free-tier request ceiling
+during this session's live-testing — recommended a one-time $10 credit purchase to raise it,
+user's call. Also known but explicitly deferred by the user this session: the two permanently
+`RUNNING` reviews from 2026-08-25 (orphaned, need a manual DB fix) and the live Docker
+containers being 11 days stale (need a rebuild to pick up Step 8 + all of today's work,
+including this OpenRouter change) — neither touched. `pnpm --filter @codeiq/api test` (363/363)
+clean.
+
 ## 2026-09-06 side fixes (unrelated to the active task below)
 Three `codeiq29091993 Bot` Warning/Logic findings closed this session, plus one new piece of
 tooling the bot's own review suggested:
@@ -14,9 +55,8 @@ tooling the bot's own review suggested:
 - New: `apps/api/scripts/verify-github-app-slug.ts` + `.github/workflows/verify-github-app-
   slug.yml` (this repo's first CI workflow) — re-verifies the GitHub App slug against GitHub's
   own registration on a schedule/on change, per the bot's "implement automated validation"
-  suggestion on the earlier slug-drift incident. **Needs `APP_GITHUB_ID`/
-  `APP_GITHUB_PRIVATE_KEY` repo secrets added before it can actually run** — see `state/next.md`
-  item 8.
+  suggestion on the earlier slug-drift incident. Repo secrets added, confirmed green on a real
+  Actions run.
 See `state/completed.md`'s four 2026-09-06 entries and `knowledge/domains/billing.md`/
 `knowledge/screens/billing-screens.md`/`knowledge/screens/account-screens.md`/
 `knowledge/domains/github-app.md` for detail. Does not touch the frontend Step 3–9 / backend
@@ -112,8 +152,16 @@ conditions) before trusting this at scale in production. Phase 4's dashboard UI 
    open item, and needs real cloud access this session doesn't have.
 
 ## Working branch
-This session's work landed directly on `feat/auth-screens` (the branch already checked out at
-session start) as 5 separate commits — docs+billing/repos API, then one commit per screen
-(Onboarding, Overview, Repos, Reviews, Billing). Check `git log` before assuming a different
-branch name; `memory/pitfalls.md` documents the branch-naming convention for *new* branches, but
-this session extended the existing one rather than cutting a new one.
+Stale note from earlier in this multi-day session — kept for history, superseded below. This
+session's *original* work landed directly on `feat/auth-screens` (the branch already checked out
+at session start) as 5 separate commits — docs+billing/repos API, then one commit per screen
+(Onboarding, Overview, Repos, Reviews, Billing).
+
+**2026-09-06 update:** `feat/auth-screens` kept accumulating commits all day (billing fixes,
+account tabs, the GitHub Actions slug-check workflow, the OpenRouter fallback chain, the jobId
+fix — see `state/completed.md` for all of it) — check `git log` for the real list, this note
+won't be kept exhaustively current. The one exception: the review-coordinator idempotency fix
+(this file's top entry) is on a **new** branch, `fix/review-coordinator-idempotency`, cut off
+`feat/auth-screens` at `cc9d084` — per explicit user instruction to use a fresh branch for that
+piece of work, following the `fix/*` convention `memory/pitfalls.md` documents for new branches.
+Committed there as `60bb1d9`; not yet merged anywhere.

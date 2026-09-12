@@ -470,14 +470,19 @@ describe('DiffService.chunkFiles', () => {
 
 ## gemini.service.ts
 
+`GeminiService` depends on `ILLMClient` (renamed from `IGeminiClient` 2026-09-06, `decisions/008`
+— it stopped being Gemini-specific once OpenRouter fallback models joined the pipeline) and
+knows nothing about retries, multiple providers, or which specific model answered — that's all
+composed into the single injected client by `lib/llm-client.ts`'s `buildLLMClient()` before it
+ever reaches this class. See `decisions/008` for the full Adapter/Decorator/Composite design.
+
 ### reviewDiff pseudocode:
 ```
 reviewDiff(patch, config, filename):
   systemPrompt = buildSystemPrompt(config, filename)
-  result = await geminiClient.generateContent({
+  result = await llmClient.generateContent({
     systemInstruction: systemPrompt,
     contents: [{ role: 'user', parts: [{ text: patch }] }],
-    generationConfig: { responseMimeType: 'application/json' },
   })
   raw = JSON.parse(result.response.text())
   return ReviewResultSchema.parse(raw)  // throws ZodError on bad output
@@ -635,8 +640,17 @@ describe('CommentService.postReview', () => {
   call) rather than this doc inventing a `dismissed` column speculatively. If dismiss becomes
   real, it needs a decision on semantics first (per-user dismissal vs. global, does it affect
   `GET /reviews/stats` counts, etc.) before a migration.
-- **`GeminiService` depends on `IGeminiClient`, not the `@google/generative-ai` SDK's own
+- **`GeminiService` depends on `ILLMClient`, not the `@google/generative-ai` SDK's own
   `GenerativeModel` type** — a narrow interface (`generateContent` only) declared in
-  `review.types.ts`. `lib/gemini.ts` constructs the real `GenerativeModel` via
-  `genAI.getGenerativeModel(...)` and types the export against `IGeminiClient`, so unit tests
-  mock a plain object instead of the SDK, same pattern as `IGithubApiClient`.
+  `review.types.ts` (renamed from `IGeminiClient` 2026-09-06, `decisions/008`, once it stopped
+  being Gemini-only). `lib/gemini.ts` constructs the real `GenerativeModel` via
+  `genAI.getGenerativeModel(...)` and types the export against `ILLMClient`, so unit tests mock
+  a plain object instead of the SDK, same pattern as `IGithubApiClient`.
+- **Multi-model fallback (`decisions/008`, 2026-09-06):** `lib/llm-client.ts` composes Gemini
+  plus a chain of OpenRouter free models behind that same `ILLMClient` interface —
+  `RetryingLLMClient` (retry-with-backoff decorator) wrapping each model, then `FallbackLLMClient`
+  (tries each in order, falls through on any failure) wrapping the whole chain. `container.ts`
+  wires the composed singleton (`llmClient`) into `GeminiService` instead of `geminiModel`
+  directly. Retry-with-backoff used to live inside `GeminiService` itself; it moved into this
+  file's `RetryingLLMClient` so it applies uniformly regardless of provider, and so
+  `GeminiService` could go back to just building prompts and parsing responses.
