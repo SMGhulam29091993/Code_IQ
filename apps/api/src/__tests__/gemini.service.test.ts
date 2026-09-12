@@ -15,7 +15,7 @@ function buildConfig(overrides: Partial<SanitizedRepoConfig> = {}): SanitizedRep
 }
 
 function mockResponse(json: unknown) {
-  return { response: { text: () => JSON.stringify(json) } };
+  return { text: JSON.stringify(json) };
 }
 
 describe("GeminiService.reviewDiff", () => {
