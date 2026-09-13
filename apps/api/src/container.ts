@@ -8,6 +8,7 @@ import { ReviewCoordinatorJobProcessor } from "./jobs/review-coordinator.job";
 import { ReviewFinalizeJobProcessor } from "./jobs/review-finalize.job";
 import { FairnessService } from "./lib/fairness";
 import { llmClient } from "./lib/llm-client";
+import { LlmExhaustionService } from "./lib/llm-exhaustion";
 import { redis } from "./lib/redis";
 import { stripeClient } from "./lib/stripe";
 import { AuthController } from "./modules/auth/auth.controller";
@@ -105,6 +106,7 @@ const diffService = new DiffService();
 const geminiService = new GeminiService(llmClient);
 const commentService = new CommentService();
 const fairnessService = new FairnessService(redis);
+const llmExhaustionService = new LlmExhaustionService(redis);
 
 const reviewService = new ReviewService(
   reviewRepository,
@@ -136,7 +138,8 @@ export const reviewChunkJobProcessor = new ReviewChunkJobProcessor(
   reviewIssueRepository,
   reviewChunkRepository,
   geminiService,
-  fairnessService
+  fairnessService,
+  llmExhaustionService
 );
 
 export const reviewFinalizeJobProcessor = new ReviewFinalizeJobProcessor(

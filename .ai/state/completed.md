@@ -1,6 +1,45 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-09-13 (Fast-fail + user-facing message on full LLM exhaustion — same branch `fix/llm-client-exhaustion-summary-log`)
+User-reported: when every LLM fallback tier (decisions/008 — Gemini + 5 OpenRouter free models)
+hits its free-tier quota mid-review, the review just sat in `RUNNING` for a long time with no
+explanation — each `review-chunk` job independently rediscovered the exhaustion and burned its
+own 3 BullMQ retries on a call that couldn't possibly succeed, and the chunk queue's fleet-wide
+5/min limiter meant a multi-chunk PR could take many minutes to finally settle `FAILED`, at which
+point the dashboard showed only a generic "This review failed to complete." User picked "fail
+fast, whole review" over a simpler per-chunk-only option when asked.
+- `lib/llm-client.ts`'s `FallbackLLMClient` now throws a typed `AllTiersExhaustedError` (carrying
+  the per-tier failure list) instead of rethrowing the last provider error.
+- New `lib/llm-exhaustion.ts` (`LlmExhaustionService`, same shape as `lib/fairness.ts`): a
+  per-review Redis flag (600s TTL) so once any chunk hits full exhaustion, every other
+  queued/running chunk for that same review short-circuits on its next pickup instead of calling
+  the LLM at all.
+- `jobs/review-chunk.job.ts`: on `AllTiersExhaustedError`, marks the chunk failed, sets the
+  exhaustion flag, and throws BullMQ's `UnrecoverableError` (terminal, no further retries of that
+  chunk); checks the flag before calling the LLM too.
+- New `Review.failureReason String?` column (migration `20260913120000_add_review_failure_
+  reason`, plain nullable string matching the `ReviewIssue.severity`/`category` convention, not a
+  Prisma enum). `review-finalize.job.ts` sets it to `"FREE_TIER_EXHAUSTED"` when every failed
+  chunk carries the fast-fail marker, re-querying real `ReviewChunk.error` values as always.
+- Dashboard (`ReviewDetailContent.tsx`): FAILED state now shows a specific "Your team's free AI
+  review quota has been reached. Upgrade for uninterrupted reviews, or wait for the free tier to
+  refresh." message + a `/billing` link (reusing `PlanLimitBanner.tsx`'s pattern) when
+  `failureReason === "FREE_TIER_EXHAUSTED"`, else the original generic message. Retry stays
+  available either way; no polling-hook change needed.
+- Migration applied by hand (`ALTER TABLE "Review" ADD COLUMN "failureReason" TEXT;` via `docker
+  exec` into the local Postgres container) rather than `prisma migrate dev`, because that command
+  demanded a full `migrate reset` — the local dev DB already had unrelated drift from
+  `fix/github-review-id-overflow`'s BigInt migration (committed on that sibling branch, applied to
+  the shared dev DB, not merged here). That drift is pre-existing and out of scope for this fix —
+  documented as `memory/pitfalls.md` #018.
+- 378/378 API tests (368 existing + 10 new across `llm-client.test.ts`, new
+  `llm-exhaustion.test.ts`, `review-chunk.job.test.ts`, `review-finalize.job.test.ts`), 97/97 web
+  tests (including a new `ReviewDetailContent.test.tsx` case), typecheck and lint clean on both
+  apps. `decisions/008` gained a dated addendum; `knowledge/domains/review.md`,
+  `knowledge/screens/dashboard-screens.md`, and `knowledge/technical/backend/api-guidelines.md`
+  updated for the new `failureReason` field and pipeline behavior.
+
 ## 2026-09-12 (Fix: `ILLMClient` no longer returns Gemini's own response shape — same branch `fix/llm-client-exhaustion-summary-log`)
 - Second `codeiq29091993 Bot` finding on `decisions/008`, same session: `ILLMClient.
   generateContent`'s return type, `{ response: { text(): string } }`, was flagged as "highly

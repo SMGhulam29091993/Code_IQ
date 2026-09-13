@@ -1,4 +1,5 @@
 import type { Job } from "bullmq";
+import { ALL_TIERS_EXHAUSTED_CHUNK_ERROR } from "./review-chunk.job";
 import { getInstallationOctokit } from "../lib/octokit";
 import type { IInstallationRepository } from "../modules/github/github.types";
 import type {
@@ -40,7 +41,16 @@ export class ReviewFinalizeJobProcessor {
     // ALL chunks failing is a pipeline failure. A partial failure isn't — the DONE ones' issues
     // still get summarized and posted, with a note about the gap.
     if (allChunks.length > 0 && failedChunks.length === allChunks.length) {
-      await this.reviewRepo.update(reviewId, { status: "FAILED" });
+      // The fast-fail short circuit (jobs/review-chunk.job.ts, decisions/008 addendum) stamps
+      // every chunk it terminates early with this exact marker — re-querying real ReviewChunk
+      // rows here (never a transient flag) to tell "ran out of free-tier quota" apart from any
+      // other reason every chunk could fail, so the dashboard can show a specific, actionable
+      // message instead of a generic failure.
+      const exhausted = failedChunks.some((chunk) => chunk.error === ALL_TIERS_EXHAUSTED_CHUNK_ERROR);
+      await this.reviewRepo.update(reviewId, {
+        status: "FAILED",
+        failureReason: exhausted ? "FREE_TIER_EXHAUSTED" : null,
+      });
       return;
     }
 

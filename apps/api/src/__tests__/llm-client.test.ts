@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { FallbackLLMClient, RetryingLLMClient } from "../lib/llm-client";
+import { AllTiersExhaustedError, FallbackLLMClient, RetryingLLMClient } from "../lib/llm-client";
 import type { ILLMClient } from "../modules/reviews/review.types";
 
 function mockResponse(text: string) {
@@ -160,7 +160,7 @@ describe("FallbackLLMClient", () => {
     expect(result.text).toBe("b");
   });
 
-  it("throws the last error when every client fails", async () => {
+  it("throws the last error's message when every client fails", async () => {
     const first: ILLMClient = { generateContent: vi.fn().mockRejectedValue(new Error("fail 1")) };
     const second: ILLMClient = {
       generateContent: vi.fn().mockRejectedValue(new Error("fail 2")),
@@ -171,6 +171,23 @@ describe("FallbackLLMClient", () => {
     ]);
 
     await expect(chain.generateContent({ contents: [] })).rejects.toThrow("fail 2");
+  });
+
+  // decisions/008's fast-fail addendum: review-chunk.job.ts needs a reliable instanceof check
+  // (not string-matching) to short-circuit the rest of a review once the whole chain is
+  // exhausted, rather than rethrowing whichever provider error happened to come back last.
+  it("throws a typed AllTiersExhaustedError carrying every tier's failure reason", async () => {
+    const first: ILLMClient = { generateContent: vi.fn().mockRejectedValue(openRouterError(429)) };
+    const second: ILLMClient = { generateContent: vi.fn().mockRejectedValue(openRouterError(401)) };
+    const chain = new FallbackLLMClient([
+      { client: first, label: "first" },
+      { client: second, label: "second" },
+    ]);
+
+    const err = await chain.generateContent({ contents: [] }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(AllTiersExhaustedError);
+    expect((err as AllTiersExhaustedError).failures).toEqual(["first=429", "second=401"]);
   });
 
   it("throws at construction time when given no clients", () => {

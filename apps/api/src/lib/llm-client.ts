@@ -40,6 +40,23 @@ export class RetryingLLMClient implements ILLMClient {
   }
 }
 
+// Thrown by FallbackLLMClient once every tier has failed — a typed alternative to rethrowing
+// whichever provider error happened to come back last, so callers that need to react
+// specifically to "the whole chain is exhausted" (review-chunk.job.ts's fast-fail short circuit)
+// can `instanceof` check instead of string-matching an arbitrary provider error. `message` is
+// deliberately copied from the last tier's own error so existing callers that only read
+// `.message` (e.g. log lines) see the same text as before this type existed.
+export class AllTiersExhaustedError extends Error {
+  constructor(
+    message: string,
+    public readonly failures: string[],
+    public override readonly cause?: unknown
+  ) {
+    super(message);
+    this.name = "AllTiersExhaustedError";
+  }
+}
+
 // Composite / Chain of Responsibility — tries each client in priority order, falling through to
 // the next on *any* failure. A failure on one model/provider says nothing about the next one:
 // each tier here is typically a different provider with its own separate quota, so a 429 on
@@ -74,7 +91,8 @@ export class FallbackLLMClient implements ILLMClient {
     console.error(
       `[llm-client] ALL_TIERS_EXHAUSTED (${failures.length}/${this.tiers.length} tiers failed): ${failures.join(", ")}`
     );
-    throw lastErr;
+    const message = lastErr instanceof Error ? lastErr.message : String(lastErr);
+    throw new AllTiersExhaustedError(message, failures, lastErr);
   }
 }
 

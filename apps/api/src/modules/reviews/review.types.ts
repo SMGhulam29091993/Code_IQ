@@ -31,6 +31,8 @@ export interface SanitizedReviewSummary {
   totalChunks: number;
   completedChunks: number;
   truncated: boolean;
+  // null unless status is FAILED with a specific, user-actionable cause — see UpdateReviewInput.
+  failureReason: string | null;
 }
 
 export interface SanitizedReview extends SanitizedReviewSummary {
@@ -107,6 +109,11 @@ export interface UpdateReviewInput {
   githubReviewId?: number;
   totalChunks?: number;
   truncated?: boolean;
+  // Set only when status is FAILED and the cause is user-facing/actionable — currently just
+  // "FREE_TIER_EXHAUSTED" (review-finalize.job.ts). null/omitted for a plain generic failure
+  // (e.g. a setup error in review-coordinator.job.ts) — same plain-string convention as
+  // ReviewIssue.severity/category, not a Prisma enum, so new reasons don't need a migration.
+  failureReason?: string | null;
 }
 
 export interface CreateIssueInput {
@@ -133,6 +140,9 @@ export interface ReviewChunkRow {
   chunkIndex: number;
   status: ChunkStatus;
   attempts: number;
+  // Set by markFailed — review-finalize.job.ts reads this to tell an ALL_TIERS_EXHAUSTED failure
+  // apart from any other failure when every chunk in the review failed.
+  error?: string | null;
 }
 
 export interface IReviewRepository {
@@ -250,6 +260,13 @@ export interface IDiffService {
 export interface IFairnessService {
   priorityFor(installationId: string): Promise<number>;
   markInFlight(installationId: string, delta: number): Promise<void>;
+}
+
+// Per-review circuit breaker for lib/llm-client.ts's AllTiersExhaustedError — see
+// lib/llm-exhaustion.ts for the full rationale and decisions/008's fast-fail addendum.
+export interface ILlmExhaustionService {
+  markExhausted(reviewId: string): Promise<void>;
+  isExhausted(reviewId: string): Promise<boolean>;
 }
 
 export interface IGeminiService {

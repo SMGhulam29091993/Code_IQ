@@ -1,6 +1,7 @@
 "use client";
 
 import { type FC, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
 import type { IssueSeverity } from "@codeiq/types";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -87,13 +88,29 @@ export const ReviewDetailContent: FC<ReviewDetailContentProps> = ({ reviewId }) 
   }
 
   if (review.status === "FAILED") {
+    const quotaExhausted = review.failureReason === "FREE_TIER_EXHAUSTED";
     return (
       <div>
         <PageHeader crumb={crumb} title="Review" action={openPrAction} />
         <div className="flex flex-col gap-4">
           <ReviewHeader review={review} repoFullName={repo?.fullName} />
-          <div className="flex flex-col items-center gap-3 rounded-card border border-red/20 bg-red/5 py-12 text-center">
-            <p className="text-sm text-text2">This review failed to complete.</p>
+          <div
+            className={cn(
+              "flex flex-col items-center gap-3 rounded-card border py-12 text-center",
+              quotaExhausted ? "border-yellow/20 bg-yellow/10" : "border-red/20 bg-red/5"
+            )}
+          >
+            {quotaExhausted ? (
+              <p className="max-w-md text-sm text-yellow">
+                Your team&apos;s free AI review quota has been reached. Upgrade for
+                uninterrupted reviews, or wait for the free tier to refresh.{" "}
+                <Link href="/billing" className="font-medium underline">
+                  View plans
+                </Link>
+              </p>
+            ) : (
+              <p className="text-sm text-text2">This review failed to complete.</p>
+            )}
             <Button
               variant="secondary"
               disabled={retryMutation.isPending}
