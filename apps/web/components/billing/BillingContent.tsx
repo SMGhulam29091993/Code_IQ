@@ -52,8 +52,9 @@ export const BillingContent: FC = () => {
           <div className="max-w-lg rounded-card border border-dashed border-border2 bg-surface p-6 text-center">
             <h2 className="font-display text-lg font-semibold text-text">No subscription yet</h2>
             <p className="mt-2 text-sm leading-relaxed text-text2">
-              {installations?.[0]?.accountLogin ?? "This account"} is on the free tier. Add a card
-              to move to Pro or Team and unlock private repositories.
+              {installations?.[0]?.accountLogin ?? "This account"} is on the free tier (up to 3
+              repos, 50 reviews/month). Add a card to move to Pro or Team for unlimited repos and
+              reviews.
             </p>
           </div>
         )}
