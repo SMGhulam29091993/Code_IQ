@@ -1,6 +1,21 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
+## 2026-09-13 (Fast-fail + user-facing message on full LLM exhaustion, on branch `fix/llm-client-exhaustion-summary-log`)
+User-reported UX bug, third piece of work on this same branch/ADR thread (decisions/008): when
+every LLM fallback tier hits its free-tier limit mid-review, the review used to sit in `RUNNING`
+for a long time with no explanation before eventually settling `FAILED` with only a generic
+message. Fixed per `state/completed.md`'s matching entry — `AllTiersExhaustedError` (typed,
+`lib/llm-client.ts`), a new per-review Redis circuit breaker (`lib/llm-exhaustion.ts`) that lets
+`jobs/review-chunk.job.ts` fast-fail via BullMQ's `UnrecoverableError` instead of retrying/letting
+every chunk independently rediscover the exhaustion, a new `Review.failureReason` column set by
+`review-finalize.job.ts`, and a specific "upgrade or wait" message + `/billing` link on the
+dashboard's Review Detail FAILED state (`ReviewDetailContent.tsx`) when
+`failureReason === "FREE_TIER_EXHAUSTED"`. 378/378 API tests, 97/97 web tests, typecheck/lint
+clean both apps. Migration applied by hand against the local dev DB (not `prisma migrate dev`) due
+to pre-existing unrelated drift from `fix/github-review-id-overflow` — see `memory/pitfalls.md`
+#018 for why, and note that drift is still unresolved (not this session's to fix).
+
 ## 2026-09-12 (Second fix on the same branch: `ILLMClient` shape, `fix/llm-client-exhaustion-summary-log`)
 A second bot finding on `decisions/008` (same session): `ILLMClient.generateContent`'s return
 type mimicked Gemini's own SDK response object, correctly flagged as too provider-specific.
