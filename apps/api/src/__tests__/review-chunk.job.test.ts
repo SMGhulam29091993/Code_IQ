@@ -1,10 +1,13 @@
 import type { Job } from "bullmq";
+import { UnrecoverableError } from "bullmq";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ReviewChunkJobProcessor } from "../jobs/review-chunk.job";
+import { ALL_TIERS_EXHAUSTED_CHUNK_ERROR, ReviewChunkJobProcessor } from "../jobs/review-chunk.job";
+import { AllTiersExhaustedError } from "../lib/llm-client";
 import type { SanitizedRepoConfig } from "../modules/repos/repo.types";
 import type {
   IFairnessService,
   IGeminiService,
+  ILlmExhaustionService,
   IReviewChunkRepository,
   IReviewIssueRepository,
   IReviewRepository,
@@ -39,6 +42,7 @@ describe("ReviewChunkJobProcessor.process", () => {
   let reviewChunkRepo: IReviewChunkRepository;
   let geminiService: IGeminiService;
   let fairnessService: IFairnessService;
+  let llmExhaustionService: ILlmExhaustionService;
   let processor: ReviewChunkJobProcessor;
 
   beforeEach(() => {
@@ -75,13 +79,18 @@ describe("ReviewChunkJobProcessor.process", () => {
     };
 
     fairnessService = { priorityFor: vi.fn().mockResolvedValue(1), markInFlight: vi.fn() };
+    llmExhaustionService = {
+      isExhausted: vi.fn().mockResolvedValue(false),
+      markExhausted: vi.fn(),
+    };
 
     processor = new ReviewChunkJobProcessor(
       reviewRepo,
       reviewIssueRepo,
       reviewChunkRepo,
       geminiService,
-      fairnessService
+      fairnessService,
+      llmExhaustionService
     );
   });
 
@@ -141,5 +150,49 @@ describe("ReviewChunkJobProcessor.process", () => {
     await expect(processor.process(buildJob())).rejects.toThrow();
     expect(fairnessService.markInFlight).toHaveBeenNthCalledWith(1, "install-1", 1);
     expect(fairnessService.markInFlight).toHaveBeenNthCalledWith(2, "install-1", -1);
+  });
+
+  // Fast-fail short circuit (decisions/008 addendum): once the LLM fallback chain is fully
+  // exhausted for a review, retrying (or letting every other chunk independently rediscover the
+  // same exhaustion) just wastes time nobody's quota will recover from within a BullMQ backoff
+  // window — see jobs/review-chunk.job.ts's file comment.
+  describe("fast-fail on ALL_TIERS_EXHAUSTED", () => {
+    it("marks the review exhausted and throws UnrecoverableError when Gemini exhausts every tier", async () => {
+      vi.mocked(geminiService.reviewDiff).mockRejectedValue(
+        new AllTiersExhaustedError("every tier failed", ["gemini=429", "openrouter=400"])
+      );
+
+      await expect(processor.process(buildJob())).rejects.toBeInstanceOf(UnrecoverableError);
+
+      expect(reviewChunkRepo.markFailed).toHaveBeenCalledWith("chunk-1", ALL_TIERS_EXHAUSTED_CHUNK_ERROR);
+      expect(llmExhaustionService.markExhausted).toHaveBeenCalledWith("review-1");
+    });
+
+    it("skips calling Gemini entirely when the review is already marked exhausted", async () => {
+      vi.mocked(llmExhaustionService.isExhausted).mockResolvedValue(true);
+
+      await expect(processor.process(buildJob())).rejects.toBeInstanceOf(UnrecoverableError);
+
+      expect(geminiService.reviewDiff).not.toHaveBeenCalled();
+      expect(reviewChunkRepo.markFailed).toHaveBeenCalledWith("chunk-1", ALL_TIERS_EXHAUSTED_CHUNK_ERROR);
+      expect(llmExhaustionService.markExhausted).not.toHaveBeenCalled();
+      expect(fairnessService.markInFlight).not.toHaveBeenCalled();
+    });
+
+    it("still increments completedChunks when short-circuiting on an already-exhausted review", async () => {
+      vi.mocked(llmExhaustionService.isExhausted).mockResolvedValue(true);
+
+      await expect(processor.process(buildJob())).rejects.toThrow();
+
+      expect(reviewRepo.incrementCompletedChunks).toHaveBeenCalledWith("review-1");
+    });
+
+    it("leaves other error types rethrown plainly and retryable (regression)", async () => {
+      vi.mocked(geminiService.reviewDiff).mockRejectedValue(new Error("gemini timeout"));
+
+      const err = await processor.process(buildJob()).catch((e: unknown) => e);
+
+      expect(err).not.toBeInstanceOf(UnrecoverableError);
+    });
   });
 });

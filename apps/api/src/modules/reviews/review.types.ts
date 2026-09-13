@@ -31,6 +31,8 @@ export interface SanitizedReviewSummary {
   totalChunks: number;
   completedChunks: number;
   truncated: boolean;
+  // null unless status is FAILED with a specific, user-actionable cause — see UpdateReviewInput.
+  failureReason: string | null;
 }
 
 export interface SanitizedReview extends SanitizedReviewSummary {
@@ -107,6 +109,11 @@ export interface UpdateReviewInput {
   githubReviewId?: number;
   totalChunks?: number;
   truncated?: boolean;
+  // Set only when status is FAILED and the cause is user-facing/actionable — currently just
+  // "FREE_TIER_EXHAUSTED" (review-finalize.job.ts). null/omitted for a plain generic failure
+  // (e.g. a setup error in review-coordinator.job.ts) — same plain-string convention as
+  // ReviewIssue.severity/category, not a Prisma enum, so new reasons don't need a migration.
+  failureReason?: string | null;
 }
 
 export interface CreateIssueInput {
@@ -133,6 +140,9 @@ export interface ReviewChunkRow {
   chunkIndex: number;
   status: ChunkStatus;
   attempts: number;
+  // Set by markFailed — review-finalize.job.ts reads this to tell an ALL_TIERS_EXHAUSTED failure
+  // apart from any other failure when every chunk in the review failed.
+  error?: string | null;
 }
 
 export interface IReviewRepository {
@@ -252,23 +262,41 @@ export interface IFairnessService {
   markInFlight(installationId: string, delta: number): Promise<void>;
 }
 
+// Per-review circuit breaker for lib/llm-client.ts's AllTiersExhaustedError — see
+// lib/llm-exhaustion.ts for the full rationale and decisions/008's fast-fail addendum.
+export interface ILlmExhaustionService {
+  markExhausted(reviewId: string): Promise<void>;
+  isExhausted(reviewId: string): Promise<boolean>;
+}
+
 export interface IGeminiService {
   reviewDiff(patch: string, config: SanitizedRepoConfig, filename: string): Promise<GeminiReviewResult>;
   summarizePR(prTitle: string, issues: Array<GeminiIssue & { file: string }>): Promise<string>;
 }
 
 // Provider-agnostic single-call LLM seam (renamed from IGeminiClient 2026-09-06 — decisions/008
-// — once GeminiService started depending on more than just Gemini). Shape is still the narrow
-// slice of `@google/generative-ai`'s GenerativeModel that GeminiService actually calls; every
-// adapter (lib/gemini.ts's GeminiClient, lib/openrouter.ts's OpenRouterClient) translates its
-// own provider's request/response into this shape, and lib/llm-client.ts composes adapters
-// behind it (retry decorator, multi-model fallback chain) so GeminiService/IGeminiService never
-// know more than one model — or provider — exists.
+// — once GeminiService started depending on more than just Gemini). Every adapter (lib/gemini.ts's
+// GeminiClient, lib/openrouter.ts's OpenRouterClient) translates its own provider's request/
+// response into this shape, and lib/llm-client.ts composes adapters behind it (retry decorator,
+// multi-model fallback chain) so GeminiService/IGeminiService never know more than one model —
+// or provider — exists.
+//
+// The return type is a plain `{ text }`, not `@google/generative-ai`'s own `{ response: {
+// text() } }` shape (changed 2026-09-12, codeiq29091993 Bot's own review of decisions/008 —
+// the original shape mimicked Gemini's SDK response object so lib/gemini.ts could skip writing
+// an adapter class at all, structural typing alone made a real GenerativeModel satisfy this
+// interface; that convenience was exactly the "too provider-specific" problem the finding
+// raised). GeminiService only ever needs the resolved text, never a method to fetch it, so
+// flattening cost nothing at the call site and both providers now go through a real adapter
+// uniformly. Deliberately *not* a generic `LLMResponse<T>` with `.json()`/`.usage()` — nothing
+// in this codebase consumes token-usage or non-text response data yet, and building that out
+// speculatively would be exactly the premature abstraction this project's conventions warn
+// against; revisit if/when a real caller needs it.
 export interface ILLMClient {
   generateContent(request: {
     systemInstruction?: string;
     contents: Array<{ role: string; parts: Array<{ text: string }> }>;
-  }): Promise<{ response: { text(): string } }>;
+  }): Promise<{ text: string }>;
 }
 
 export interface PostReviewInput {

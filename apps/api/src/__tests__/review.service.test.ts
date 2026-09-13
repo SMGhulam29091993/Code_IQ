@@ -49,6 +49,7 @@ function buildReview(overrides: Partial<Review> = {}): Review {
     totalChunks: 0,
     completedChunks: 0,
     truncated: false,
+    failureReason: null,
     coordinatorJobId: null,
     createdAt: NOW,
     updatedAt: NOW,

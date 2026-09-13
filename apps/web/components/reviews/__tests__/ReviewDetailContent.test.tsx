@@ -67,6 +67,31 @@ describe("ReviewDetailContent", () => {
     expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
+  it("shows the free-tier-exhausted message and an upgrade link when failureReason is FREE_TIER_EXHAUSTED", async () => {
+    server.use(
+      http.get("/api/reviews/:reviewId", () =>
+        HttpResponse.json({
+          success: true,
+          message: "Success",
+          data: {
+            review: {
+              ...mockReview,
+              status: "FAILED",
+              failureReason: "FREE_TIER_EXHAUSTED",
+              issues: [],
+            },
+          },
+        })
+      )
+    );
+
+    renderWithProviders(<ReviewDetailContent reviewId="rev_1" />);
+
+    expect(await screen.findByText(/free ai review quota has been reached/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View plans" })).toHaveAttribute("href", "/billing");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
   it("shows empty state when review has 0 issues", async () => {
     server.use(
       http.get("/api/reviews/:reviewId", () =>

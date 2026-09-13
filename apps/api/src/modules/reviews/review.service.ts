@@ -200,6 +200,7 @@ function sanitizeReviewSummary(review: Review): SanitizedReviewSummary {
     totalChunks: review.totalChunks,
     completedChunks: review.completedChunks,
     truncated: review.truncated,
+    failureReason: review.failureReason,
   };
 }
 

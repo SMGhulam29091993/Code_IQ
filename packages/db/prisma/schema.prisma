@@ -98,6 +98,12 @@ model Review {
   prAuthor         String
   headSha          String
   status           ReviewStatus  @default(PENDING)
+  // Set only when status is FAILED with a specific, user-actionable cause — currently just
+  // "FREE_TIER_EXHAUSTED" (review-finalize.job.ts, when every chunk failed because the LLM
+  // fallback chain — decisions/008 — was fully exhausted). Plain nullable string, not a Prisma
+  // enum, matching this schema's existing convention for small closed sets (ReviewIssue.severity/
+  // category) so a new reason doesn't need a migration. null for a plain generic failure.
+  failureReason    String?
   summary          String?
   filesReviewed    Int           @default(0)
   // A 32-bit Int overflows on real GitHub review ids (e.g. 5185926759, hit live 2026-09-12 on

@@ -113,6 +113,10 @@ export interface ReviewSummary {
   totalChunks: number;
   completedChunks: number;
   truncated: boolean;
+  // null unless status is FAILED with a specific, user-actionable cause (currently only
+  // "FREE_TIER_EXHAUSTED" — the LLM fallback chain, decisions/008, ran out of every tier's free
+  // quota mid-review).
+  failureReason: string | null;
 }
 
 // Matches apps/api/src/modules/reviews/review.types.ts SanitizedReview.

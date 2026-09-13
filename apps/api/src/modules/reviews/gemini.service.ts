@@ -22,7 +22,7 @@ export class GeminiService implements IGeminiService {
       systemInstruction,
       contents: [{ role: "user", parts: [{ text: patch }] }],
     });
-    const raw: unknown = JSON.parse(result.response.text());
+    const raw: unknown = JSON.parse(result.text);
     return GeminiReviewResultSchema.parse(raw);
   }
 
@@ -40,7 +40,7 @@ export class GeminiService implements IGeminiService {
         },
       ],
     });
-    const raw: unknown = JSON.parse(result.response.text());
+    const raw: unknown = JSON.parse(result.text);
     return GeminiSummaryResultSchema.parse(raw).summary;
   }
 }

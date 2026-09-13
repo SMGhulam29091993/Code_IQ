@@ -1,65 +1,86 @@
 # Completed
 > Append-only. Newest at top.
 
-## 2026-09-12 (Fix: misleading "unlock private repositories" billing copy)
-- User asked "can we add private repos for review" — investigation found private-repo access
-  has never actually been restricted anywhere in this codebase: `Repo` has no `isPrivate` field
-  at all, and `repo.service.ts`'s only FREE-tier gate (`FREE_TIER_ACTIVE_REPO_LIMIT`) checks
-  *count* (3 active repos), never visibility. The Billing screen's FREE-tier empty state,
-  inherited verbatim from the original Claude Design mockup, claimed "Add a card to move to Pro
-  or Team and unlock private repositories" — a promise nothing in the backend ever enforced, and
-  a gap not previously flagged in `state/blockers.md` alongside the other three known
-  mockup-vs-reality gaps.
-- Explicit product decision (user's call, offered as an option alongside "actually build the
-  restriction"): fix the copy to match reality rather than retroactively restrict private repos
-  no one had reason to expect were ever blocked. New copy uses the plan table's real
-  differentiators (`knowledge/domains/billing.md` — 3 repos/50 reviews on FREE vs. unlimited on
-  Pro/Team): *"`{accountLogin}` is on the free tier (up to 3 repos, 50 reviews/month). Add a card
-  to move to Pro or Team for unlimited repos and reviews."* Updated in
-  `apps/web/components/billing/BillingContent.tsx` and `knowledge/screens/billing-screens.md`
-  (the only two places the old claim appeared — confirmed via a full-repo search). No test
-  asserted the old exact string, so nothing broke; typecheck/lint/`pnpm --filter @codeiq/web
-  test` (96/96) all clean.
+## 2026-09-13 (Fast-fail + user-facing message on full LLM exhaustion — same branch `fix/llm-client-exhaustion-summary-log`)
+User-reported: when every LLM fallback tier (decisions/008 — Gemini + 5 OpenRouter free models)
+hits its free-tier quota mid-review, the review just sat in `RUNNING` for a long time with no
+explanation — each `review-chunk` job independently rediscovered the exhaustion and burned its
+own 3 BullMQ retries on a call that couldn't possibly succeed, and the chunk queue's fleet-wide
+5/min limiter meant a multi-chunk PR could take many minutes to finally settle `FAILED`, at which
+point the dashboard showed only a generic "This review failed to complete." User picked "fail
+fast, whole review" over a simpler per-chunk-only option when asked.
+- `lib/llm-client.ts`'s `FallbackLLMClient` now throws a typed `AllTiersExhaustedError` (carrying
+  the per-tier failure list) instead of rethrowing the last provider error.
+- New `lib/llm-exhaustion.ts` (`LlmExhaustionService`, same shape as `lib/fairness.ts`): a
+  per-review Redis flag (600s TTL) so once any chunk hits full exhaustion, every other
+  queued/running chunk for that same review short-circuits on its next pickup instead of calling
+  the LLM at all.
+- `jobs/review-chunk.job.ts`: on `AllTiersExhaustedError`, marks the chunk failed, sets the
+  exhaustion flag, and throws BullMQ's `UnrecoverableError` (terminal, no further retries of that
+  chunk); checks the flag before calling the LLM too.
+- New `Review.failureReason String?` column (migration `20260913120000_add_review_failure_
+  reason`, plain nullable string matching the `ReviewIssue.severity`/`category` convention, not a
+  Prisma enum). `review-finalize.job.ts` sets it to `"FREE_TIER_EXHAUSTED"` when every failed
+  chunk carries the fast-fail marker, re-querying real `ReviewChunk.error` values as always.
+- Dashboard (`ReviewDetailContent.tsx`): FAILED state now shows a specific "Your team's free AI
+  review quota has been reached. Upgrade for uninterrupted reviews, or wait for the free tier to
+  refresh." message + a `/billing` link (reusing `PlanLimitBanner.tsx`'s pattern) when
+  `failureReason === "FREE_TIER_EXHAUSTED"`, else the original generic message. Retry stays
+  available either way; no polling-hook change needed.
+- Migration applied by hand (`ALTER TABLE "Review" ADD COLUMN "failureReason" TEXT;` via `docker
+  exec` into the local Postgres container) rather than `prisma migrate dev`, because that command
+  demanded a full `migrate reset` — the local dev DB already had unrelated drift from
+  `fix/github-review-id-overflow`'s BigInt migration (committed on that sibling branch, applied to
+  the shared dev DB, not merged here). That drift is pre-existing and out of scope for this fix —
+  documented as `memory/pitfalls.md` #018.
+- 378/378 API tests (368 existing + 10 new across `llm-client.test.ts`, new
+  `llm-exhaustion.test.ts`, `review-chunk.job.test.ts`, `review-finalize.job.test.ts`), 97/97 web
+  tests (including a new `ReviewDetailContent.test.tsx` case), typecheck and lint clean on both
+  apps. `decisions/008` gained a dated addendum; `knowledge/domains/review.md`,
+  `knowledge/screens/dashboard-screens.md`, and `knowledge/technical/backend/api-guidelines.md`
+  updated for the new `failureReason` field and pipeline behavior.
 
-## 2026-09-12 (Milestone + fix: first-ever real successful review, then a real bug fixed — branch `fix/github-review-id-overflow`)
-- The `fix/review-coordinator-idempotency` PR (#9) got merged, which itself triggered a real
-  webhook review of that same PR. Found `RUNNING` since 2026-09-06 (6 days) when checked —
-  the local `pnpm dev` worker had been intermittently up/down, so it kept trickling through the
-  same 21 chunks whenever it happened to be running. User asked to pause it; while clearing the
-  queue (same approach as the earlier pause, `Queue.getJobs` + `.remove()` for this reviewId),
-  found its `review-finalize-queue` job was already actively locked/processing — and unlike
-  every previous attempt this session, this one had 2 of 21 chunks reach real `DONE` (through
-  the OpenRouter fallback chain, during a clear window), so the finalize job's "all chunks
-  failed" short-circuit didn't apply. It genuinely finished: posted a **real review comment to
-  the actual GitHub PR #9** (`codeiq29091993[bot]`, review id `5185926759`, confirmed live via
-  `octokit.pulls.listReviews` — its own body correctly diagnosed the OpenRouter throttle issue
-  this whole session had been fighting). First real success this pipeline has ever achieved.
-- That success immediately exposed a new, real bug: the finalize job's own
-  `reviewRepo.update(reviewId, { status: "DONE", githubReviewId, ... })` crashed with a Postgres
-  `integer` range error — `Review.githubReviewId` was a 32-bit `Int`, and `5185926759` doesn't
-  fit. Left the `Review` row stuck showing `RUNNING` locally despite GitHub already having the
-  correct, real review. Full writeup in `memory/pitfalls.md` #017.
-- Fixed on a fresh branch (`fix/github-review-id-overflow`, deliberately separate from the
-  idempotency fix — unrelated bug): `Review.githubReviewId` widened to `BigInt` (migration
-  `20260912085606_widen_github_review_id_to_bigint`, same non-interactive `prisma migrate diff
-  --from-config-datasource` + hand-placed migration folder + `migrate deploy` approach as the
-  previous migration, since `migrate dev` still needs a TTY this environment doesn't have).
-  `ReviewRepository.update` converts an incoming plain-number `githubReviewId` to `BigInt(...)`
-  before writing; `review.service.ts`'s `sanitizeReview` converts back to `Number(...)` on the
-  way out (safe — GitHub ids stay far under `Number.MAX_SAFE_INTEGER`; a raw `bigint` would
-  otherwise throw on `JSON.stringify` if it ever reached a response body). Business-facing types
-  (`UpdateReviewInput`, `SanitizedReview`) unchanged — only the repository's Prisma-facing edge
-  does the conversion. New tests: `review.repository.test.ts` (new file — this repository had no
-  dedicated unit test before, matching this project's "thin passthroughs don't get one, real
-  logic does" pattern) covers the BigInt conversion directly; `review.service.test.ts` gained a
-  case asserting the sanitizer's output round-trips through `JSON.stringify` without throwing.
-  369/369 tests, typecheck, lint, and `pnpm --filter @codeiq/db build && pnpm --filter
-  @codeiq/api build` all clean.
-- Manually reconciled the stuck `Review` row once the schema could hold the real value: `status:
-  DONE`, the real `githubReviewId` (`5185926759`), and `filesReviewed` recomputed as `2` (the
-  count of distinct filenames among the review's actually-`DONE` `ReviewChunk` rows) rather than
-  its stale `0`. `.ai/plans/database.md` updated per `schema.prisma`'s own "update in the same
-  change" instruction.
+## 2026-09-12 (Fix: `ILLMClient` no longer returns Gemini's own response shape — same branch `fix/llm-client-exhaustion-summary-log`)
+- Second `codeiq29091993 Bot` finding on `decisions/008`, same session: `ILLMClient.
+  generateContent`'s return type, `{ response: { text(): string } }`, was flagged as "highly
+  specific, potentially limiting flexibility for future LLMs" — correctly. That shape wasn't
+  arbitrary; it was chosen so `lib/gemini.ts` could skip writing an adapter at all
+  (`geminiModel: ILLMClient = genAI.getGenerativeModel(...)` type-checked via plain structural
+  typing, since a real `GenerativeModel`'s `generateContent` already returns something matching
+  `{ response: { text() } }`). That convenience *was* the coupling the finding identified.
+- Flattened `ILLMClient.generateContent` to `Promise<{ text: string }>`. `lib/gemini.ts` gained
+  a real `GeminiClient` adapter class (translates `result.response.text()` → `{ text:
+  result.response.text() }`), matching `OpenRouterClient`'s existing pattern — both providers go
+  through an explicit adapter uniformly now. `OpenRouterClient.generateContent` simplified to
+  `return { text }` directly. `GeminiService` reads `result.text` instead of
+  `result.response.text()`.
+- Explicitly declined the finding's own suggestion (a generic `LLMResponse<T>` with
+  `.json()`/`.usage()`): nothing in this codebase consumes token-usage or non-text response data
+  today, despite both providers' APIs returning it — building that out now would be exactly the
+  premature abstraction this project's conventions warn against. Addendum added to
+  `decisions/008` explaining the reasoning either way (what was fixed, what was declined, why).
+- Updated every test mock constructing an `ILLMClient` response (`gemini.service.test.ts`,
+  `llm-client.test.ts`, `openrouter-client.test.ts`) from `{ response: { text: () => ... } }` to
+  `{ text: ... }`. Verified live post-change: `buildLLMClient()`'s full real chain
+  (`RetryingLLMClient` → `FallbackLLMClient` → adapter) round-trips the flat shape correctly
+  against a real provider, not just under mocks. 368/368 tests, typecheck, lint, full build all
+  clean. `knowledge/domains/review.md`'s pseudocode updated to match.
+
+## 2026-09-12 (Diagnosability: ALL_TIERS_EXHAUSTED summary log — branch `fix/llm-client-exhaustion-summary-log`)
+- `codeiq29091993 Bot`'s own review of `decisions/008` flagged that OpenRouter's account-level
+  free-tier throttle undermines the fallback strategy (every model fails together, and the
+  recovery — a $10 credit purchase — is external to the code) and suggested monitoring/alerting.
+  Asked the user for scope; chosen: log a clear warning only, no new monitoring
+  infrastructure/scheduled checks/user alerts.
+- `FallbackLLMClient.generateContent` (`lib/llm-client.ts`) now logs one `console.error` summary
+  line when every configured tier is exhausted — `ALL_TIERS_EXHAUSTED (N/N tiers failed):
+  tier1=reason1, tier2=reason2, ...` — instead of leaving that diagnosis to be reconstructed from
+  N separate per-tier `console.warn` lines. New `describeError` helper gives each tier a short
+  reason (HTTP status, `429(daily quota)` for Gemini's specific case from decisions/008, or
+  `network error` for a status-less failure). Doesn't fix the throttle — can't, it's external —
+  just makes an already-existing failure mode `grep`-able. Addendum added to `decisions/008`.
+  2 new tests in `llm-client.test.ts` (summary line content, daily-quota labeling). 368/368
+  tests, typecheck, lint, build all clean.
 
 ## 2026-09-06 (Fix: review-coordinator.job.ts idempotency — branch `fix/review-coordinator-idempotency`)
 - Fixed the duplicate-`Review`-row bug flagged (not fixed) in the same day's earlier jobId-bug
