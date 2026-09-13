@@ -1,0 +1,10 @@
+# Regenerates the Prisma client when schema.prisma changed across this checkout — see
+# .ai/memory/pitfalls.md #017. git args: $1=previous HEAD, $2=new HEAD, $3=1 for a real branch
+# checkout (0 for a single-file `git checkout -- <file>`, which never touches schema.prisma
+# project-wide and would make this hook fire needlessly).
+[ "$3" = "1" ] || exit 0
+
+if ! git diff --quiet "$1" "$2" -- packages/db/prisma/schema.prisma 2>/dev/null; then
+  echo "schema.prisma changed across this checkout — regenerating the Prisma client..."
+  pnpm --filter @codeiq/db exec prisma generate
+fi

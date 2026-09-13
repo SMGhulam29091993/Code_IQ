@@ -258,17 +258,28 @@ export interface IGeminiService {
 }
 
 // Provider-agnostic single-call LLM seam (renamed from IGeminiClient 2026-09-06 — decisions/008
-// — once GeminiService started depending on more than just Gemini). Shape is still the narrow
-// slice of `@google/generative-ai`'s GenerativeModel that GeminiService actually calls; every
-// adapter (lib/gemini.ts's GeminiClient, lib/openrouter.ts's OpenRouterClient) translates its
-// own provider's request/response into this shape, and lib/llm-client.ts composes adapters
-// behind it (retry decorator, multi-model fallback chain) so GeminiService/IGeminiService never
-// know more than one model — or provider — exists.
+// — once GeminiService started depending on more than just Gemini). Every adapter (lib/gemini.ts's
+// GeminiClient, lib/openrouter.ts's OpenRouterClient) translates its own provider's request/
+// response into this shape, and lib/llm-client.ts composes adapters behind it (retry decorator,
+// multi-model fallback chain) so GeminiService/IGeminiService never know more than one model —
+// or provider — exists.
+//
+// The return type is a plain `{ text }`, not `@google/generative-ai`'s own `{ response: {
+// text() } }` shape (changed 2026-09-12, codeiq29091993 Bot's own review of decisions/008 —
+// the original shape mimicked Gemini's SDK response object so lib/gemini.ts could skip writing
+// an adapter class at all, structural typing alone made a real GenerativeModel satisfy this
+// interface; that convenience was exactly the "too provider-specific" problem the finding
+// raised). GeminiService only ever needs the resolved text, never a method to fetch it, so
+// flattening cost nothing at the call site and both providers now go through a real adapter
+// uniformly. Deliberately *not* a generic `LLMResponse<T>` with `.json()`/`.usage()` — nothing
+// in this codebase consumes token-usage or non-text response data yet, and building that out
+// speculatively would be exactly the premature abstraction this project's conventions warn
+// against; revisit if/when a real caller needs it.
 export interface ILLMClient {
   generateContent(request: {
     systemInstruction?: string;
     contents: Array<{ role: string; parts: Array<{ text: string }> }>;
-  }): Promise<{ response: { text(): string } }>;
+  }): Promise<{ text: string }>;
 }
 
 export interface PostReviewInput {

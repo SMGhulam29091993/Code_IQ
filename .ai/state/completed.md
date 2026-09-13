@@ -1,6 +1,48 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-09-12 (Fix: `ILLMClient` no longer returns Gemini's own response shape — same branch `fix/llm-client-exhaustion-summary-log`)
+- Second `codeiq29091993 Bot` finding on `decisions/008`, same session: `ILLMClient.
+  generateContent`'s return type, `{ response: { text(): string } }`, was flagged as "highly
+  specific, potentially limiting flexibility for future LLMs" — correctly. That shape wasn't
+  arbitrary; it was chosen so `lib/gemini.ts` could skip writing an adapter at all
+  (`geminiModel: ILLMClient = genAI.getGenerativeModel(...)` type-checked via plain structural
+  typing, since a real `GenerativeModel`'s `generateContent` already returns something matching
+  `{ response: { text() } }`). That convenience *was* the coupling the finding identified.
+- Flattened `ILLMClient.generateContent` to `Promise<{ text: string }>`. `lib/gemini.ts` gained
+  a real `GeminiClient` adapter class (translates `result.response.text()` → `{ text:
+  result.response.text() }`), matching `OpenRouterClient`'s existing pattern — both providers go
+  through an explicit adapter uniformly now. `OpenRouterClient.generateContent` simplified to
+  `return { text }` directly. `GeminiService` reads `result.text` instead of
+  `result.response.text()`.
+- Explicitly declined the finding's own suggestion (a generic `LLMResponse<T>` with
+  `.json()`/`.usage()`): nothing in this codebase consumes token-usage or non-text response data
+  today, despite both providers' APIs returning it — building that out now would be exactly the
+  premature abstraction this project's conventions warn against. Addendum added to
+  `decisions/008` explaining the reasoning either way (what was fixed, what was declined, why).
+- Updated every test mock constructing an `ILLMClient` response (`gemini.service.test.ts`,
+  `llm-client.test.ts`, `openrouter-client.test.ts`) from `{ response: { text: () => ... } }` to
+  `{ text: ... }`. Verified live post-change: `buildLLMClient()`'s full real chain
+  (`RetryingLLMClient` → `FallbackLLMClient` → adapter) round-trips the flat shape correctly
+  against a real provider, not just under mocks. 368/368 tests, typecheck, lint, full build all
+  clean. `knowledge/domains/review.md`'s pseudocode updated to match.
+
+## 2026-09-12 (Diagnosability: ALL_TIERS_EXHAUSTED summary log — branch `fix/llm-client-exhaustion-summary-log`)
+- `codeiq29091993 Bot`'s own review of `decisions/008` flagged that OpenRouter's account-level
+  free-tier throttle undermines the fallback strategy (every model fails together, and the
+  recovery — a $10 credit purchase — is external to the code) and suggested monitoring/alerting.
+  Asked the user for scope; chosen: log a clear warning only, no new monitoring
+  infrastructure/scheduled checks/user alerts.
+- `FallbackLLMClient.generateContent` (`lib/llm-client.ts`) now logs one `console.error` summary
+  line when every configured tier is exhausted — `ALL_TIERS_EXHAUSTED (N/N tiers failed):
+  tier1=reason1, tier2=reason2, ...` — instead of leaving that diagnosis to be reconstructed from
+  N separate per-tier `console.warn` lines. New `describeError` helper gives each tier a short
+  reason (HTTP status, `429(daily quota)` for Gemini's specific case from decisions/008, or
+  `network error` for a status-less failure). Doesn't fix the throttle — can't, it's external —
+  just makes an already-existing failure mode `grep`-able. Addendum added to `decisions/008`.
+  2 new tests in `llm-client.test.ts` (summary line content, daily-quota labeling). 368/368
+  tests, typecheck, lint, build all clean.
+
 ## 2026-09-06 (Fix: review-coordinator.job.ts idempotency — branch `fix/review-coordinator-idempotency`)
 - Fixed the duplicate-`Review`-row bug flagged (not fixed) in the same day's earlier jobId-bug
   entry below. New nullable-unique `Review.coordinatorJobId` column

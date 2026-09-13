@@ -55,14 +55,25 @@ export class FallbackLLMClient implements ILLMClient {
 
   async generateContent(request: GenerateContentRequest): Promise<GenerateContentResult> {
     let lastErr: unknown;
+    const failures: string[] = [];
     for (const { client, label } of this.tiers) {
       try {
         return await client.generateContent(request);
       } catch (err) {
         lastErr = err;
+        failures.push(`${label}=${describeError(err)}`);
         console.warn(`[llm-client] "${label}" exhausted its retries, falling back: ${String(err)}`);
       }
     }
+    // One clear, greppable line when the *entire* chain is exhausted — found worth adding
+    // 2026-09-12 (codeiq29091993 Bot's own review of decisions/008): OpenRouter's account-level
+    // free-tier throttle takes down every configured model at once, and piecing that together
+    // from the per-tier warnings above means reading N log lines instead of one. This doesn't
+    // fix the throttle (still needs the $10 credit purchase — decisions/008, state/next.md item
+    // 9, external to this codebase) — it just makes the failure mode diagnosable at a glance.
+    console.error(
+      `[llm-client] ALL_TIERS_EXHAUSTED (${failures.length}/${this.tiers.length} tiers failed): ${failures.join(", ")}`
+    );
     throw lastErr;
   }
 }
@@ -93,6 +104,15 @@ function isRetryableError(err: unknown): boolean {
   if (status !== 429 && status < 500) return false;
   if (status === 429 && isDailyQuotaError(err)) return false;
   return true;
+}
+
+// A short, human-scannable reason per tier for the ALL_TIERS_EXHAUSTED summary line above —
+// deliberately terser than the full error (already logged in full by the per-attempt warnings).
+function describeError(err: unknown): string {
+  const status = (err as { status?: number } | undefined)?.status;
+  if (status === 429 && isDailyQuotaError(err)) return "429(daily quota)";
+  if (status !== undefined) return String(status);
+  return "network error";
 }
 
 function isDailyQuotaError(err: unknown): boolean {
