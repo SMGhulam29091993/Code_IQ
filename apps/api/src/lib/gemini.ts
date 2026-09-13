@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import type { GenerativeModel } from "@google/generative-ai";
 import { env } from "./env";
 import type { ILLMClient } from "../modules/reviews/review.types";
 
@@ -11,11 +12,30 @@ import type { ILLMClient } from "../modules/reviews/review.types";
 // enabled and Pro-tier quality is wanted instead.
 const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
 
-// Typed against ILLMClient (not the SDK's own GenerativeModel type) so GeminiService only ever
-// depends on the narrow interface it actually calls — see review.types.ts. Consumed by
-// lib/llm-client.ts, which wraps it in retry-with-backoff and puts it first in the multi-model
-// fallback chain (decisions/008) — never imported directly by GeminiService itself anymore.
-export const geminiModel: ILLMClient = genAI.getGenerativeModel({
-  model: "gemini-2.5-flash",
-  generationConfig: { responseMimeType: "application/json" },
-});
+// Adapter — translates the real SDK's GenerateContentResult (`result.response.text()`) into
+// ILLMClient's plain `{ text }` shape. Added 2026-09-12 (codeiq29091993 Bot's own review of
+// decisions/008): ILLMClient used to be shaped to structurally match GenerativeModel's own
+// response object specifically so this file could skip writing an adapter — `geminiModel:
+// ILLMClient = genAI.getGenerativeModel(...)` type-checked with no wrapper at all. That
+// convenience *was* the "interface too specific to one provider's SDK" problem the finding
+// raised, so both providers now go through a real adapter uniformly — see review.types.ts's
+// ILLMClient comment.
+class GeminiClient implements ILLMClient {
+  constructor(private readonly model: GenerativeModel) {}
+
+  async generateContent(
+    request: Parameters<ILLMClient["generateContent"]>[0]
+  ): ReturnType<ILLMClient["generateContent"]> {
+    const result = await this.model.generateContent(request);
+    return { text: result.response.text() };
+  }
+}
+
+// Consumed by lib/llm-client.ts, which wraps it in retry-with-backoff and puts it first in the
+// multi-model fallback chain (decisions/008) — never imported directly by GeminiService itself.
+export const geminiModel: ILLMClient = new GeminiClient(
+  genAI.getGenerativeModel({
+    model: "gemini-2.5-flash",
+    generationConfig: { responseMimeType: "application/json" },
+  })
+);

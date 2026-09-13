@@ -147,7 +147,11 @@ Response includes:
 
 ### GET /api/reviews/:reviewId
 - Auth: JWT
-- 200: `{ review: { id, prNumber, prTitle, prAuthor, headSha, status, summary, filesReviewed, issues: ReviewIssue[], createdAt } }`
+- 200: `{ review: { id, prNumber, prTitle, prAuthor, headSha, status, summary, filesReviewed, issues: ReviewIssue[], createdAt, failureReason } }`
+- `failureReason` is `null` unless `status` is `FAILED` with a specific, user-actionable cause —
+  currently only `"FREE_TIER_EXHAUSTED"` (every LLM fallback tier, decisions/008, exhausted its
+  free-tier quota mid-review). Also present on `GET /reviews` list items (same field on
+  `SanitizedReviewSummary`).
 - 403: not owner · 404: not found
 
 ### POST /api/reviews/:reviewId/retry

@@ -44,6 +44,11 @@ Also owns the review history endpoints for the dashboard.
   }
 }
 ```
+Each `Review`/summary also carries `failureReason: string | null` (decisions/008's 2026-09-13
+addendum) — `null` unless `status` is `FAILED` with a specific, user-actionable cause; currently
+only `"FREE_TIER_EXHAUSTED"`, set when every chunk failed because the LLM fallback chain
+(decisions/008) ran out of every tier's free quota. The dashboard's Review Detail screen shows a
+specific "upgrade or wait" message for that case instead of a generic failure message.
 
 **Edge cases:**
 | Case | Expected behaviour | Status |
@@ -341,7 +346,8 @@ already loaded — a retry never re-runs the truncation decision, only the coord
 | PR has 0 reviewable files after filtering | Coordinator marks DONE with note, no fan-out, no GitHub comment |
 | PR produces more chunks than `MAX_CHUNKS_PER_REVIEW` (200) | Coordinator keeps the largest-diff chunks (`diffService.prioritizeFiles`), marks `Review.truncated = true`; finalize appends a note to the summary |
 | A Gemini chunk call fails (after its own retries) | That chunk stays FAILED; finalize still posts the DONE chunks' issues, with a note about the gap |
-| ALL chunks fail | Finalize marks review FAILED without posting to GitHub |
+| ALL chunks fail | Finalize marks review FAILED without posting to GitHub; sets `failureReason: "FREE_TIER_EXHAUSTED"` if every failed chunk carries the `ALL_TIERS_EXHAUSTED` marker (see next row), else `null` |
+| Every LLM fallback tier (decisions/008) exhausted mid-review | The chunk that discovers it (`AllTiersExhaustedError`) marks the review exhausted via `LlmExhaustionService` (Redis, per-review, 600s TTL) and throws BullMQ's `UnrecoverableError` — no more of its own retries. Every other chunk for the *same* review still queued/running checks that flag before calling the LLM and fails the same way on its next pickup, instead of each independently burning 3 attempts × 6 tiers. Settles to FAILED in roughly one chunk's processing time |
 | One installation has many chunks in flight | `fairnessService` lowers that installation's next chunk jobs' BullMQ priority — doesn't block them, just deprioritizes relative to quieter installations |
 | GitHub rate limit hit (403) | BullMQ retry with exponential backoff (whichever job made the call) |
 | PR deleted before review finishes | GitHub API returns 404 — mark DONE, log warning |
@@ -376,12 +382,17 @@ describe('ReviewChunkJobProcessor.process', () => {
   it('marks the chunk FAILED and rethrows (so BullMQ retries) when Gemini fails')
   it('increments completedChunks whether the chunk succeeds or fails')
   it('marks the installation in flight around the Gemini call, on success or failure')
+  // Fast-fail short circuit (decisions/008 2026-09-13 addendum)
+  it('marks the review exhausted and throws UnrecoverableError when Gemini exhausts every tier')
+  it('skips calling Gemini entirely when the review is already marked exhausted')
+  it('still increments completedChunks when short-circuiting on an already-exhausted review')
 })
 
 describe('ReviewFinalizeJobProcessor.process', () => {
   it('posts a single GitHub review with every issue aggregated for the review')
   it('marks the review DONE with distinct-filename filesReviewed and the githubReviewId')
   it('marks the review FAILED without posting when every chunk failed')
+  it('sets failureReason FREE_TIER_EXHAUSTED when every chunk failed via the fast-fail short circuit')
   it('still posts and marks DONE on a partial failure, noting the gap in the summary')
   it('notes the per-review analysis limit in the summary when the review was truncated')
 })
@@ -393,6 +404,13 @@ describe('FairnessService', () => {
   it('scopes the in-flight key to the installation')
   it('increments the installation\'s counter and refreshes its TTL')
   it('supports decrementing when a chunk finishes')
+})
+
+describe('LlmExhaustionService', () => {
+  it('reports not exhausted when no flag is set')
+  it('reports exhausted once markExhausted has set the flag')
+  it('scopes the flag to the review')
+  it('sets the flag with a TTL')
 })
 ```
 
@@ -484,7 +502,7 @@ reviewDiff(patch, config, filename):
     systemInstruction: systemPrompt,
     contents: [{ role: 'user', parts: [{ text: patch }] }],
   })
-  raw = JSON.parse(result.response.text())
+  raw = JSON.parse(result.text)  // ILLMClient's plain {text} shape, decisions/008's 2026-09-12 addendum
   return ReviewResultSchema.parse(raw)  // throws ZodError on bad output
 ```
 
@@ -654,3 +672,15 @@ describe('CommentService.postReview', () => {
   directly. Retry-with-backoff used to live inside `GeminiService` itself; it moved into this
   file's `RetryingLLMClient` so it applies uniformly regardless of provider, and so
   `GeminiService` could go back to just building prompts and parsing responses.
+- **Fast-fail on full LLM exhaustion (`decisions/008`'s 2026-09-13 addendum):**
+  `FallbackLLMClient` throws a typed `lib/llm-client.ts` `AllTiersExhaustedError` once every tier
+  fails, instead of rethrowing the last provider error. `jobs/review-chunk.job.ts` catches it,
+  marks the chunk failed with a fixed marker, records the review as exhausted in
+  `lib/llm-exhaustion.ts`'s `LlmExhaustionService` (per-review Redis flag, 600s TTL), and throws
+  BullMQ's `UnrecoverableError` so this attempt isn't retried; it also checks that flag *before*
+  calling the LLM at all, so every other chunk for the same review short-circuits instead of each
+  independently rediscovering the exhaustion. `review-finalize.job.ts` reads the marker back off
+  `ReviewChunk.error` (never a transient flag) to set `Review.failureReason:
+  "FREE_TIER_EXHAUSTED"`, which the dashboard's Review Detail screen (`ReviewDetailContent.tsx`)
+  uses to show a specific "upgrade or wait" message instead of a generic failure — see
+  `knowledge/screens/dashboard-screens.md`.

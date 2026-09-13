@@ -1,16 +1,49 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
-## 2026-09-12 (Milestone + fix, on branch `fix/github-review-id-overflow`)
-The `fix/review-coordinator-idempotency` PR merged and its own triggered review became this
-pipeline's **first-ever genuine success** — a real comment posted to GitHub PR #9 via the
-OpenRouter fallback chain. That success immediately crashed the finalize job's own DB write
-(`Review.githubReviewId` was a 32-bit `Int`; real GitHub ids don't fit) — fixed by widening to
-`BigInt` with conversion contained to `review.repository.ts`/`review.service.ts`'s Prisma
-boundary. New migration `20260912085606_widen_github_review_id_to_bigint`. The stuck review row
-manually reconciled to its real, correct state. 369/369 tests, typecheck/lint/build all clean.
-Full detail in `state/completed.md`, `memory/pitfalls.md` #017. Committed on the new branch, not
-yet merged.
+## 2026-09-13 (Fast-fail + user-facing message on full LLM exhaustion, on branch `fix/llm-client-exhaustion-summary-log`)
+User-reported UX bug, third piece of work on this same branch/ADR thread (decisions/008): when
+every LLM fallback tier hits its free-tier limit mid-review, the review used to sit in `RUNNING`
+for a long time with no explanation before eventually settling `FAILED` with only a generic
+message. Fixed per `state/completed.md`'s matching entry — `AllTiersExhaustedError` (typed,
+`lib/llm-client.ts`), a new per-review Redis circuit breaker (`lib/llm-exhaustion.ts`) that lets
+`jobs/review-chunk.job.ts` fast-fail via BullMQ's `UnrecoverableError` instead of retrying/letting
+every chunk independently rediscover the exhaustion, a new `Review.failureReason` column set by
+`review-finalize.job.ts`, and a specific "upgrade or wait" message + `/billing` link on the
+dashboard's Review Detail FAILED state (`ReviewDetailContent.tsx`) when
+`failureReason === "FREE_TIER_EXHAUSTED"`. 378/378 API tests, 97/97 web tests, typecheck/lint
+clean both apps. Migration applied by hand against the local dev DB (not `prisma migrate dev`) due
+to pre-existing unrelated drift from `fix/github-review-id-overflow` — see `memory/pitfalls.md`
+#018 for why, and note that drift is still unresolved (not this session's to fix).
+
+## 2026-09-12 (Second fix on the same branch: `ILLMClient` shape, `fix/llm-client-exhaustion-summary-log`)
+A second bot finding on `decisions/008` (same session): `ILLMClient.generateContent`'s return
+type mimicked Gemini's own SDK response object, correctly flagged as too provider-specific.
+Flattened to `Promise<{ text: string }>`; `lib/gemini.ts` gained a real adapter class (was
+previously exempt via structural typing, which was the actual coupling). Declined the finding's
+own suggestion of a generic `LLMResponse<T>` with `.json()`/`.usage()` — no real caller needs it
+yet. Verified live against the real provider chain post-change. 368/368 tests, typecheck, lint,
+build clean. Full detail + reasoning in `state/completed.md` and `decisions/008`'s new addendum.
+
+## 2026-09-12 (Diagnosability fix, on branch `fix/llm-client-exhaustion-summary-log`)
+Per a `codeiq29091993 Bot` review of `decisions/008` flagging the OpenRouter account-throttle
+gap: added one clear `ALL_TIERS_EXHAUSTED` summary log line to `FallbackLLMClient` when every
+tier fails, scoped to logging-only (user's explicit choice over building monitoring/alerting
+infra). 368/368 tests, typecheck/lint/build clean. Full detail in `state/completed.md`,
+addendum in `decisions/008`.
+
+**As-of-this-session branch inventory** (4 sibling branches off the same merged base
+`6e94982`, each a distinct unrelated fix, none merged into each other):
+- `fix/github-review-id-overflow` (`f16385b`) — githubReviewId BigInt fix — pushed? no (last
+  checked 2026-09-12, local-only)
+- `fix/billing-private-repo-copy` (`65ed905`) — billing copy fix — pushed? no (local-only)
+- `fix/llm-client-exhaustion-summary-log` (this entry) — pushed? no (local-only, just created)
+Mid-session, the working directory was found switched to `fix/review-coordinator-idempotency`
+(already merged) — not a revert of the other two branches' work (both confirmed intact via
+`git log --oneline <branch> -1` before proceeding), just something to watch for: branch
+switches from outside this session (IDE, user's own terminal) aren't visible here, and the
+gitignored generated Prisma client needs a manual `prisma generate` after one to match
+whichever branch's `schema.prisma` is actually checked out.
 
 ## 2026-09-06 (Fix: review-coordinator.job.ts idempotency, on branch `fix/review-coordinator-idempotency`)
 The duplicate-`Review`-row bug flagged in the jobId-bug entry below is now fixed on its own

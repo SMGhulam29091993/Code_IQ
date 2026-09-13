@@ -506,7 +506,12 @@ describe('ReviewsList', () => {
   `filesReviewed`/`createdAt` on the polled `Review` row; if that's too coarse, show a generic
   "Reviewing…" spinner instead of a fabricated per-file counter)
 - [ ] On DONE: `ReviewHeader` (summary + 4 meta stats) + `FileRail` + selected file's `IssueCard`s
-- [ ] On FAILED: full-page failed state + Retry button
+- [ ] On FAILED: full-page failed state + Retry button — when `review.failureReason ===
+  "FREE_TIER_EXHAUSTED"` (decisions/008's 2026-09-13 addendum), shows a specific amber message
+  ("Your team's free AI review quota has been reached. Upgrade for uninterrupted reviews, or wait
+  for the free tier to refresh.") + a `/billing` "View plans" link, reusing
+  `PlanLimitBanner.tsx`'s banner pattern; otherwise the original generic "This review failed to
+  complete." message. Retry stays available either way
 - [ ] `FileRail`: one row per distinct `issue.file`, sorted by first appearance in `review.issues`;
   each row shows the file's basename + directory, issue count, and a colour tick for the worst
   severity present in that file; selecting a row shows only that file's issues
@@ -555,6 +560,7 @@ ReviewDetailPage:
 |------|-----------|
 | Review has 0 issues | "No issues found. Great work! 🎉" empty state (no file rail shown) |
 | Review is FAILED | Full-page failed state with retry button |
+| Review is FAILED with `failureReason: "FREE_TIER_EXHAUSTED"` | Same failed state, but the message and styling are quota-specific with a `/billing` upgrade link instead of the generic message |
 | Retry mutation in flight | Retry button disabled, shows spinner |
 | reviewId belongs to another user | API 403 → redirect to `/reviews` |
 | reviewId not found | API 404 → Next.js `not-found.tsx` |
@@ -574,6 +580,7 @@ describe('ReviewDetailPage', () => {
   it('shows only the active file\'s issues in the issue panel')
   it('shows processing state when PENDING or RUNNING')
   it('shows failed state with retry button when FAILED')
+  it('shows the free-tier-exhausted message and an upgrade link when failureReason is FREE_TIER_EXHAUSTED')
   it('shows empty state when review has 0 issues')
   it('filters issues by severity client-side')
   it('opens GitHub PR link in new tab')

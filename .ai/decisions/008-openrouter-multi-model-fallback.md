@@ -100,3 +100,118 @@ assumed up front:
 **Applies to:** backend (`apps/api/src/lib/gemini.ts`, `apps/api/src/lib/openrouter.ts`,
 `apps/api/src/lib/llm-client.ts`, `apps/api/src/modules/reviews/gemini.service.ts`,
 `apps/api/src/modules/reviews/review.types.ts`, `apps/api/src/container.ts`)
+
+## Addendum (2026-09-12): diagnosability for the account-level-throttle negative above
+
+`codeiq29091993 Bot`'s own review of this ADR flagged the account-level-throttle negative
+consequence above, suggesting monitoring/alerting since "the current fallback logic won't
+recover from this specific throttle." Correct, and not something code can fix — the recovery is
+external (the $10 credit purchase, still not done as of this addendum). What *is* in scope:
+diagnosability. Before this addendum, `FallbackLLMClient` logged one `console.warn` per exhausted
+tier (six lines when every tier fails), with nothing marking "this was a full-chain failure, not
+an isolated one" — piecing that together meant reading and correlating all six.
+
+**Decision:** `FallbackLLMClient.generateContent` now also logs one `console.error` summary line
+when every tier is exhausted — `ALL_TIERS_EXHAUSTED (N/N tiers failed): tier1=reason1,
+tier2=reason2, ...` — with a short per-tier reason (`describeError`: HTTP status, `429(daily
+quota)` for Gemini's specific case, or `network error` for a status-less failure). Deliberately
+scoped to logging only, not a monitoring service/scheduled check/user-facing alert — those were
+considered and explicitly declined (user's call) in favor of the smallest change that makes the
+already-existing failure mode grep-able (`grep ALL_TIERS_EXHAUSTED`) instead of needing to
+reconstruct it from scattered per-tier warnings.
+
+## Addendum (2026-09-12): `ILLMClient.generateContent` no longer returns Gemini's own response shape
+
+`codeiq29091993 Bot`'s own review of this ADR's "Adapter" bullet flagged that
+`ILLMClient.generateContent`'s return type, `{ response: { text(): string } }`, is "highly
+specific, potentially limiting flexibility for future LLMs with diverse response shapes" and
+suggested a richer, more abstract response object.
+
+The specificity was real, and not accidental: that shape was chosen originally so `lib/gemini.ts`
+could skip writing an adapter entirely — `geminiModel: ILLMClient = genAI.getGenerativeModel(...)`
+type-checked via plain structural typing, because a real `GenerativeModel`'s `generateContent`
+already returns something matching `{ response: { text() } }`. That convenience *was* the
+coupling the finding correctly identified — the interface was shaped around one provider's SDK,
+not designed independently of it.
+
+**Decision:** flattened `ILLMClient.generateContent` to return a plain `Promise<{ text: string }>`.
+`lib/gemini.ts` now has a real `GeminiClient` adapter class (translating the SDK's
+`result.response.text()` into `{ text: result.response.text() }`), matching `OpenRouterClient`'s
+existing pattern — both providers go through an explicit adapter uniformly now, none exempted by
+a structural-typing shortcut. `GeminiService` reads `result.text` instead of
+`result.response.text()`; no other business logic depends on the shape.
+
+**Explicitly not done:** a generic `LLMResponse<T>` with `.json()`/`.usage()`/similar, as the
+finding's suggestion floated. Nothing in this codebase consumes token-usage or non-text response
+data today (nothing tracks Gemini's or OpenRouter's usage metadata anywhere, despite both APIs
+returning it), so building that out now would be exactly the premature abstraction this
+project's own conventions warn against — an interface designed for hypothetical future callers
+that don't exist yet. The chosen fix addresses the actual defect (coupling to one provider's SDK
+shape) without speculatively growing the interface's surface area. Revisit if/when a real caller
+needs usage data or a non-text response.
+
+**Consequences:** every test file constructing a mock `ILLMClient` response
+(`gemini.service.test.ts`, `llm-client.test.ts`, `openrouter-client.test.ts`) updated from
+`{ response: { text: () => ... } }` to `{ text: ... }`. Verified live against the real provider
+chain post-change (`buildLLMClient()` → `RetryingLLMClient` → `FallbackLLMClient` → adapter),
+confirming the flat shape round-trips correctly end-to-end, not just under mocks. 368/368 tests,
+typecheck, lint, and full build clean.
+
+## Addendum (2026-09-13): fail fast + tell the user, instead of a silent long `RUNNING` spinner
+
+The 2026-09-12 addendum above made full-chain exhaustion *diagnosable* (one grep-able log line).
+It didn't make it fast or visible to the dashboard user: every `review-chunk` job still
+independently rediscovered the exhaustion and burned its own 3 BullMQ `attempts` retrying a call
+that couldn't possibly succeed (none of the underlying free-tier quotas reset inside a backoff
+window), and the chunk queue's fleet-wide 5/min limiter (`GEMINI_RPM_BUDGET`, `jobs/worker.ts`)
+meant a multi-chunk PR could sit in `RUNNING` for many minutes before `review-finalize.job.ts`
+finally saw every chunk had failed. Even then, the dashboard showed only a generic "This review
+failed to complete." — no indication it was a quota problem, nothing pointing at upgrading or
+waiting. User-reported: it just looks stuck, with no explanation.
+
+**Decision — fail fast, whole review (user's explicit choice over "fail fast per-chunk only"):**
+
+1. `lib/llm-client.ts`'s `FallbackLLMClient` now throws a typed `AllTiersExhaustedError` (carrying
+   the same per-tier `failures` list already computed for the log line) instead of rethrowing
+   whichever provider error happened to come back last — gives callers a reliable `instanceof`
+   check instead of string-matching an arbitrary error.
+2. New `lib/llm-exhaustion.ts` (`LlmExhaustionService`), same shape as `lib/fairness.ts`'s
+   `FairnessService`: a per-review Redis flag (`review:${reviewId}:llm-exhausted`, 600s TTL — long
+   enough to cover that review's remaining queued chunks draining at the 5/min limiter, short
+   enough not to matter once the review is long done). Scoped to one review, not global — the
+   simplest correct scope, and each concurrently-running review's own first affected chunk still
+   pays a one-time discovery cost independently, an acceptable, deliberately small blast radius
+   (same "smallest change" precedent as the log line itself).
+3. `jobs/review-chunk.job.ts`: on `AllTiersExhaustedError`, marks the chunk failed with a fixed
+   marker (`ALL_TIERS_EXHAUSTED_CHUNK_ERROR`), calls `markExhausted`, and throws BullMQ's own
+   `UnrecoverableError` instead of the raw error — this attempt is terminal, not retried. Before
+   calling Gemini at all, it now also checks `isExhausted(reviewId)` first: if another chunk
+   already tripped the breaker, it skips the LLM call entirely and fails the same way. Net effect:
+   once any chunk hits full exhaustion, every other chunk for that review still queued/running
+   fails on its very next pickup — no LLM call, no retry loop — so the Flow's children settle in
+   roughly one chunk-processing interval instead of `3 attempts × 6 tiers` per chunk.
+4. New `Review.failureReason String?` column (plain nullable string, matching the existing
+   `ReviewIssue.severity`/`category` convention rather than a Prisma enum). `review-finalize.job.ts`
+   sets it to `"FREE_TIER_EXHAUSTED"` when every failed chunk carries the exhaustion marker
+   (re-querying real `ReviewChunk.error` values, never a transient flag — same philosophy as the
+   existing DONE/FAILED gate), `null` for any other all-fail cause.
+5. Dashboard (`ReviewDetailContent.tsx`): the FAILED state now branches on `failureReason` —
+   `"FREE_TIER_EXHAUSTED"` shows "Your team's free AI review quota has been reached. Upgrade for
+   uninterrupted reviews, or wait for the free tier to refresh." plus a `/billing` link (reusing
+   `PlanLimitBanner.tsx`'s existing amber-banner pattern), otherwise the original generic message.
+   Retry stays available either way. No polling-hook change needed — `useReview`'s
+   `refetchInterval` already stops on `FAILED`; the fix is making that transition happen quickly.
+
+**Consequences:** a pathological worst case (every tier exhausted from the very first chunk of a
+huge PR) now settles to `FAILED` in roughly one chunk's processing time instead of
+`totalChunks × 3 attempts × up to 6 tiers` of wasted retries. Doesn't touch or fix the underlying
+account-level OpenRouter throttle (still the $10 credit purchase, external to this codebase) —
+purely about not making the user wait through it blind. New migration
+(`20260913120000_add_review_failure_reason`) applied by hand against the local dev Postgres
+(`ALTER TABLE "Review" ADD COLUMN "failureReason" TEXT;`) rather than via `prisma migrate dev`,
+because that command's drift check demanded a full `migrate reset` — the dev DB already had
+unrelated drift from `fix/github-review-id-overflow`'s BigInt migration (committed on that branch,
+applied to the shared dev DB, not yet merged here). Resolving that drift is out of scope for this
+fix. 378/378 API tests (368 + this addendum's 10 new ones across `llm-client.test.ts`,
+`llm-exhaustion.test.ts` (new), `review-chunk.job.test.ts`, `review-finalize.job.test.ts`), 97/97
+web tests, typecheck and lint clean on both apps.

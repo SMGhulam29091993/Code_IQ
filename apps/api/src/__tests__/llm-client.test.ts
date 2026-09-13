@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { FallbackLLMClient, RetryingLLMClient } from "../lib/llm-client";
+import { AllTiersExhaustedError, FallbackLLMClient, RetryingLLMClient } from "../lib/llm-client";
 import type { ILLMClient } from "../modules/reviews/review.types";
 
 function mockResponse(text: string) {
-  return { response: { text: () => text } };
+  return { text };
 }
 
 function geminiRateLimitError(retryDelay: string) {
@@ -56,7 +56,7 @@ describe("RetryingLLMClient", () => {
     await vi.advanceTimersByTimeAsync(2500); // Google's suggested delay + the small buffer
 
     const result = await promise;
-    expect(result.response.text()).toBe("ok");
+    expect(result.text).toBe("ok");
     expect(inner.generateContent).toHaveBeenCalledTimes(2);
   });
 
@@ -107,7 +107,7 @@ describe("RetryingLLMClient", () => {
     const promise = client.generateContent({ contents: [] });
     await vi.advanceTimersByTimeAsync(1000); // first backoff step is 1s
 
-    expect((await promise).response.text()).toBe("ok");
+    expect((await promise).text).toBe("ok");
     expect(inner.generateContent).toHaveBeenCalledTimes(2);
   });
 
@@ -141,7 +141,7 @@ describe("FallbackLLMClient", () => {
 
     const result = await chain.generateContent({ contents: [] });
 
-    expect(result.response.text()).toBe("a");
+    expect(result.text).toBe("a");
     expect(second.generateContent).not.toHaveBeenCalled();
   });
 
@@ -157,10 +157,10 @@ describe("FallbackLLMClient", () => {
 
     const result = await chain.generateContent({ contents: [] });
 
-    expect(result.response.text()).toBe("b");
+    expect(result.text).toBe("b");
   });
 
-  it("throws the last error when every client fails", async () => {
+  it("throws the last error's message when every client fails", async () => {
     const first: ILLMClient = { generateContent: vi.fn().mockRejectedValue(new Error("fail 1")) };
     const second: ILLMClient = {
       generateContent: vi.fn().mockRejectedValue(new Error("fail 2")),
@@ -173,7 +173,63 @@ describe("FallbackLLMClient", () => {
     await expect(chain.generateContent({ contents: [] })).rejects.toThrow("fail 2");
   });
 
+  // decisions/008's fast-fail addendum: review-chunk.job.ts needs a reliable instanceof check
+  // (not string-matching) to short-circuit the rest of a review once the whole chain is
+  // exhausted, rather than rethrowing whichever provider error happened to come back last.
+  it("throws a typed AllTiersExhaustedError carrying every tier's failure reason", async () => {
+    const first: ILLMClient = { generateContent: vi.fn().mockRejectedValue(openRouterError(429)) };
+    const second: ILLMClient = { generateContent: vi.fn().mockRejectedValue(openRouterError(401)) };
+    const chain = new FallbackLLMClient([
+      { client: first, label: "first" },
+      { client: second, label: "second" },
+    ]);
+
+    const err = await chain.generateContent({ contents: [] }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(AllTiersExhaustedError);
+    expect((err as AllTiersExhaustedError).failures).toEqual(["first=429", "second=401"]);
+  });
+
   it("throws at construction time when given no clients", () => {
     expect(() => new FallbackLLMClient([])).toThrow();
+  });
+
+  // codeiq29091993 Bot's own review of decisions/008 (2026-09-12): OpenRouter's account-level
+  // throttle takes every configured model down at once, and the per-tier warnings alone mean
+  // piecing that together from N log lines. This one clear, greppable summary line is the fix —
+  // doesn't recover from the throttle (that still needs the $10 credit purchase, external to
+  // this code), just makes the failure mode diagnosable at a glance.
+  it("logs one summary line naming every tier and its failure reason when the whole chain is exhausted", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const first: ILLMClient = {
+      generateContent: vi.fn().mockRejectedValue(openRouterError(429)),
+    };
+    const second: ILLMClient = {
+      generateContent: vi.fn().mockRejectedValue(openRouterError(401)),
+    };
+    const chain = new FallbackLLMClient([
+      { client: first, label: "first" },
+      { client: second, label: "second" },
+    ]);
+
+    await expect(chain.generateContent({ contents: [] })).rejects.toThrow();
+
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("ALL_TIERS_EXHAUSTED (2/2 tiers failed): first=429, second=401")
+    );
+    consoleError.mockRestore();
+  });
+
+  it("labels a daily-quota 429 distinctly from a plain 429 in the summary line", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const first: ILLMClient = {
+      generateContent: vi.fn().mockRejectedValue(geminiDailyQuotaError()),
+    };
+    const chain = new FallbackLLMClient([{ client: first, label: "gemini-2.5-flash" }]);
+
+    await expect(chain.generateContent({ contents: [] })).rejects.toThrow();
+
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("gemini-2.5-flash=429(daily quota)"));
+    consoleError.mockRestore();
   });
 });

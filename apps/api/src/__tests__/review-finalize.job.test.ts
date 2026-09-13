@@ -1,6 +1,7 @@
 import type { Job } from "bullmq";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Installation } from "@codeiq/db";
+import { ALL_TIERS_EXHAUSTED_CHUNK_ERROR } from "../jobs/review-chunk.job";
 import { ReviewFinalizeJobProcessor } from "../jobs/review-finalize.job";
 import type { IInstallationRepository } from "../modules/github/github.types";
 import type {
@@ -141,13 +142,33 @@ describe("ReviewFinalizeJobProcessor.process", () => {
 
   it("marks the review FAILED without posting when every chunk failed", async () => {
     vi.mocked(reviewChunkRepo.findByReviewId).mockResolvedValue([
-      buildChunk({ status: "FAILED" }),
-      buildChunk({ id: "chunk-2", status: "FAILED" }),
+      buildChunk({ status: "FAILED", error: "gemini timeout" }),
+      buildChunk({ id: "chunk-2", status: "FAILED", error: "gemini timeout" }),
     ]);
 
     await processor.process(buildJob());
 
-    expect(reviewRepo.update).toHaveBeenCalledWith("review-1", { status: "FAILED" });
+    expect(reviewRepo.update).toHaveBeenCalledWith("review-1", {
+      status: "FAILED",
+      failureReason: null,
+    });
+    expect(commentService.postReview).not.toHaveBeenCalled();
+  });
+
+  // decisions/008's fast-fail addendum — jobs/review-chunk.job.ts stamps every chunk it
+  // terminates via the exhaustion short circuit with this exact marker.
+  it("marks the review FAILED with failureReason FREE_TIER_EXHAUSTED when every chunk failed due to the LLM fallback chain being exhausted", async () => {
+    vi.mocked(reviewChunkRepo.findByReviewId).mockResolvedValue([
+      buildChunk({ status: "FAILED", error: ALL_TIERS_EXHAUSTED_CHUNK_ERROR }),
+      buildChunk({ id: "chunk-2", status: "FAILED", error: ALL_TIERS_EXHAUSTED_CHUNK_ERROR }),
+    ]);
+
+    await processor.process(buildJob());
+
+    expect(reviewRepo.update).toHaveBeenCalledWith("review-1", {
+      status: "FAILED",
+      failureReason: "FREE_TIER_EXHAUSTED",
+    });
     expect(commentService.postReview).not.toHaveBeenCalled();
   });
 
