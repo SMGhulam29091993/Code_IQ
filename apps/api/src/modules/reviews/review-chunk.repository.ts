@@ -19,7 +19,10 @@ export class ReviewChunkRepository implements IReviewChunkRepository {
 
   findIncomplete(reviewId: string): Promise<ReviewChunkRow[]> {
     return prisma.reviewChunk.findMany({
-      where: { reviewId, status: { in: ["PENDING", "FAILED"] } },
+      // RUNNING too: retry only accepts a FAILED review, so no chunk of it is genuinely running —
+      // a RUNNING row here is one whose job stalled out without reaching its catch block
+      // (memory/pitfalls.md #021) and must be re-run, not skipped.
+      where: { reviewId, status: { in: ["PENDING", "RUNNING", "FAILED"] } },
       orderBy: { chunkIndex: "asc" },
     });
   }

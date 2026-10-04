@@ -200,7 +200,8 @@ export interface IReviewIssueRepository {
 export interface IReviewChunkRepository {
   createMany(reviewId: string, chunks: CreateChunkInput[]): Promise<ReviewChunkRow[]>;
   findByReviewId(reviewId: string): Promise<ReviewChunkRow[]>;
-  // PENDING or FAILED rows — what a retry needs to re-run. DONE rows are never re-run/re-billed.
+  // PENDING, FAILED, or stalled-at-RUNNING rows — what a retry needs to re-run. DONE rows are
+  // never re-run/re-billed.
   findIncomplete(reviewId: string): Promise<ReviewChunkRow[]>;
   markRunning(chunkId: string): Promise<void>;
   markDone(chunkId: string): Promise<void>;
@@ -340,8 +341,8 @@ export interface ReviewChunkJobData {
 }
 
 // BullMQ job payload for the finalize job (review-finalize-queue) — the Flow parent. BullMQ
-// activates it automatically once every review-chunk child has settled; failParentOnFailure:
-// false on each child means one chunk failing (after its own retries) doesn't block this.
+// activates it automatically once every review-chunk child has settled; ignoreDependencyOnFailure:
+// true on each child means one chunk failing (after its own retries) doesn't block this.
 export interface ReviewFinalizeJobData {
   reviewId: string;
   installationId: string;

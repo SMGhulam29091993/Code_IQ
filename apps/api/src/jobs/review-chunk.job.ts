@@ -19,9 +19,9 @@ export const ALL_TIERS_EXHAUSTED_CHUNK_ERROR = "ALL_TIERS_EXHAUSTED";
 // decisions/007 Phase 3: one BullMQ job per chunk, on its own queue (review-chunk-queue) —
 // horizontally scalable by adding worker pods, and rate-limited fleet-wide via that queue's
 // Worker `limiter` option (jobs/worker.ts), not by an in-process pool. A failed attempt throws
-// so BullMQ's own attempts/backoff retries it; failParentOnFailure: false on the job (set by
-// whoever created the Flow — jobs/review-coordinator.job.ts or ReviewService.retryReview) means
-// exhausting those retries doesn't block the parent finalize job.
+// so BullMQ's own attempts/backoff retries it; ignoreDependencyOnFailure: true on the job (set
+// by whoever created the Flow — jobs/review-coordinator.job.ts or ReviewService.retryReview)
+// means exhausting those retries doesn't block the parent finalize job.
 //
 // Fast-fail exception (decisions/008 addendum): when lib/llm-client.ts's FallbackLLMClient has
 // exhausted every tier, retrying *this* chunk (or letting every other already-queued chunk for

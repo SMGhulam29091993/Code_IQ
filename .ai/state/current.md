@@ -1,6 +1,15 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
+## 2026-10-04 (Fix: reviews with any failed chunk never finalized — branch `feat/ollama-local-llm`)
+PR #15's review stuck `RUNNING`: chunk jobs stalled out on dev-server restarts, and the Flow
+parent never ran because `failParentOnFailure: false` doesn't do what decisions/007 assumed.
+Fixed on this branch (user's instruction: all fixes here, then push to re-trigger PR #15's
+review): `ignoreDependencyOnFailure: true` on chunk children, finalize counts non-DONE chunks as
+gaps, retry re-runs stalled `RUNNING` chunks. 408/408 tests. Pitfall #021, decisions/007 addendum.
+`feat/pr-review-status` (status comment + check run) is a separate branch and does NOT yet have
+this fix — it needs it before merging.
+
 ## 2026-10-04 (Local Ollama LLM tier for development, on branch `feat/ollama-local-llm`)
 Per user request: the developer's local Ollama (`qwen2.5-coder:7b`) is now the first LLM tier in
 development, ahead of Gemini → OpenRouter, so local building/testing stops burning free-tier

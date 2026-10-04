@@ -308,7 +308,7 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
             priority: 1,
             attempts: 3,
             backoff: { type: "exponential", delay: 2000 },
-            failParentOnFailure: false,
+            ignoreDependencyOnFailure: true,
           },
         },
       ],
