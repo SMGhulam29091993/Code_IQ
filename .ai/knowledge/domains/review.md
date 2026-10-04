@@ -352,6 +352,7 @@ already loaded — a retry never re-runs the truncation decision, only the coord
 | GitHub rate limit hit (403) | BullMQ retry with exponential backoff (whichever job made the call) |
 | PR deleted before review finishes | GitHub API returns 404 — mark DONE, log warning |
 | Gemini returns malformed JSON | Zod parse fails → chunk job throws → chunk marked FAILED |
+| LLM reports an issue on a line outside the PR's diff hunks | Not posted inline (GitHub would 422 the whole review); listed under "Other findings" in the review body instead |
 | Gemini returns > 50 issues for one chunk | Truncate at 50 (Zod schema `.max(50)`) |
 | File is binary (no `patch`) | Filter out in `diffService.filterFiles` |
 | File is in ignore pattern | Filter out in `diffService.filterFiles` |
@@ -548,8 +549,15 @@ describe('GeminiService.reviewDiff', () => {
 ### postReview pseudocode:
 ```
 postReview(octokit, { owner, repo, prNumber, headSha, issues, summary }):
-  // Format inline comments
-  comments = issues.map(issue => ({
+  // Only lines inside the PR's diff hunks can take an inline comment — GitHub 422s the WHOLE
+  // review ("Line could not be resolved") if even one comment misses. LLM line numbers are not
+  // trusted: fetch the PR's files (pulls.listFiles, paged), parse each patch's hunks into the
+  // set of right-side added+context lines, and split issues into anchored / unanchored.
+  commentable = fetchCommentableLines(octokit, owner, repo, prNumber)
+  anchored, unanchored = partition(issues, i => commentable[i.file]?.has(i.line))
+
+  // Format inline comments (anchored only)
+  comments = anchored.map(issue => ({
     path: issue.file,
     line: issue.line,
     body: formatComment(issue),
@@ -561,7 +569,7 @@ postReview(octokit, { owner, repo, prNumber, headSha, issues, summary }):
     pull_number: prNumber,
     commit_id: headSha,
     event: 'COMMENT',  // non-blocking — does not REQUEST_CHANGES
-    body: formatSummary(summary, issues),
+    body: formatSummary(summary, issues) + formatUnanchored(unanchored),  // "Other findings" list, max 50
     comments,
   })
   return response.data.id
@@ -598,6 +606,10 @@ describe('CommentService.postReview', () => {
   it('formats summary with issue count breakdown by severity')
   it('returns the GitHub review ID')
   it('handles empty issues array (posts summary-only review)')
+  it('posts issues on lines outside the PR diff in the summary, not as inline comments')
+  it('falls back to the summary for every issue on a file GitHub sent no patch for')
+  it('fetches every page of PR files for the commentable-line check')
+  it('omits the Other findings section when every issue is anchored')
 })
 ```
 
