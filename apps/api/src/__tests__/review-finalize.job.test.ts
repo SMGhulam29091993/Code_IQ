@@ -227,6 +227,7 @@ describe("ReviewFinalizeJobProcessor.process", () => {
         critical: 1,
         warning: 2,
         info: 0,
+        gaps: 0,
       });
     });
 
@@ -269,6 +270,7 @@ describe("ReviewFinalizeJobProcessor.process", () => {
         summary: expect.stringContaining("1 file section(s) could not be analyzed"),
       })
     );
+    expect(prStatus.complete).toHaveBeenCalledWith("review-1", expect.objectContaining({ gaps: 1 }));
   });
 
   it("marks the review FAILED when every chunk is stranded at RUNNING", async () => {

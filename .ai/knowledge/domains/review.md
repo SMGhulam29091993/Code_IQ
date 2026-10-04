@@ -342,7 +342,7 @@ the review it reports on:
 | Each chunk job's `finally` | `progress(reviewId)` — throttled to one GitHub edit per review per 15s (Redis `SET … NX EX 15`); counts real `ReviewChunk` DONE+FAILED rows, not the over-counting `completedChunks` |
 | Finalize: all chunks failed | `fail(reviewId, failureReason)` |
 | Finalize: `postReview` throws | `fail(reviewId, null)`, then rethrow |
-| Finalize: posted | `complete(reviewId, { githubReviewId, critical, warning, info })` |
+| Finalize: posted | `complete(reviewId, { githubReviewId, critical, warning, info, gaps })` — `gaps` = chunks that never reached DONE (failed or stalled), shown as a ⚠️ line so a partial review isn't presented as complete |
 | `POST /reviews/:id/retry` | `start(reviewId)` |
 
 Comment/check-run ids live on `Review.githubStatusCommentId`/`githubCheckRunId` (BigInt, via the

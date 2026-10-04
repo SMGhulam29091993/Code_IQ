@@ -171,6 +171,9 @@ export class PrStatusService implements IPrStatusService {
       result.note ??
       `**${total} ${total === 1 ? "issue" : "issues"}** — 🔴 ${result.critical} critical · 🟡 ${result.warning} warning · 🔵 ${result.info} info`;
     const lines = [`Reviewed commit \`${short(ctx.headSha)}\`.`, findings];
+    if (result.gaps) {
+      lines.push(`⚠️ ${result.gaps} file section(s) could not be analysed — their issues are missing from this review.`);
+    }
     if (reviewUrl) lines.push(`[View the review →](${reviewUrl})`);
 
     if (ctx.statusCommentId !== null) {

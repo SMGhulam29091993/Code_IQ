@@ -105,6 +105,7 @@ export class ReviewFinalizeJobProcessor {
       critical: allIssues.filter((i) => i.severity === "critical").length,
       warning: allIssues.filter((i) => i.severity === "warning").length,
       info: allIssues.filter((i) => i.severity === "info").length,
+      gaps: failedChunks.length,
     });
   }
 }

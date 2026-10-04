@@ -188,6 +188,15 @@ describe("PrStatusService", () => {
       );
     });
 
+    it("flags unanalysed sections so a partial review isn't shown as complete", async () => {
+      vi.mocked(repo.findContext).mockResolvedValue(buildContext({ statusCommentId: 1001 }));
+
+      await service.complete("review-1", { githubReviewId: 777, critical: 0, warning: 1, info: 0, gaps: 7 });
+
+      const body = octokit.issues.updateComment.mock.calls[0]![0].body as string;
+      expect(body).toContain("⚠️ 7 file section(s) could not be analysed");
+    });
+
     it("uses the note instead of counts when no review was posted", async () => {
       vi.mocked(repo.findContext).mockResolvedValue(buildContext({ statusCommentId: 1001 }));
 

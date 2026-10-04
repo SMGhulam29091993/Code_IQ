@@ -1,6 +1,17 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-10-04 (`feat/pr-review-status` brought up to date — Dev + `feat/ollama-local-llm` merged in)
+- `Dev` was already an ancestor (no-op merge). Merged `feat/ollama-local-llm` (`99ca058`):
+  conflicts only in `state/current.md`, `state/completed.md` and `review-finalize.job.test.ts` —
+  all "both sides appended" conflicts, resolved by keeping both. Verified the merged jobs/retry
+  carry both `ignoreDependencyOnFailure: true` and the `prStatus` calls.
+- Integration fix on top: `PrStatusResult.gaps` — finalize passes the non-DONE chunk count, and
+  the PR status comment shows "⚠️ N file section(s) could not be analysed" so a partial review
+  (e.g. stalled chunks, pitfall #021) isn't presented on the PR as complete.
+- 432/432 API tests, typecheck, lint clean. Not pushed from this session (no SSH key access —
+  user pushes).
+
 ## 2026-10-04 (Fix: Flow parent blocked forever by any failed chunk — branch `feat/ollama-local-llm`)
 - Root cause of PR #15 (and earlier PR #10/#8) stuck `RUNNING`: chunk children used
   `failParentOnFailure: false` (BullMQ's default — a failed child blocks the parent forever)

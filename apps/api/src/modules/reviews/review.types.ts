@@ -328,6 +328,9 @@ export interface PrStatusResult {
   critical: number;
   warning: number;
   info: number;
+  // Chunks that never reached DONE (failed or stalled out) — surfaced on the PR so a partial
+  // review isn't presented as complete.
+  gaps?: number;
   note?: string;
 }
 
