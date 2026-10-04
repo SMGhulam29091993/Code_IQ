@@ -26,6 +26,8 @@ services:
     environment:
       DATABASE_URL: postgresql://codeiq:postgres@postgres:5432/codeiq
       REDIS_URL: redis://redis:6379
+      # decisions/009 — the host's Ollama, not the container's own localhost
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
     ports:
       - "4000:4000"
     depends_on:

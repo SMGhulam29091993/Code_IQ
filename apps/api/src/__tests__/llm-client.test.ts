@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AllTiersExhaustedError, FallbackLLMClient, RetryingLLMClient } from "../lib/llm-client";
+import {
+  AllTiersExhaustedError,
+  buildLLMClient,
+  FallbackLLMClient,
+  RetryingLLMClient,
+} from "../lib/llm-client";
 import type { ILLMClient } from "../modules/reviews/review.types";
 
 function mockResponse(text: string) {
@@ -231,5 +236,68 @@ describe("FallbackLLMClient", () => {
 
     expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("gemini-2.5-flash=429(daily quota)"));
     consoleError.mockRestore();
+  });
+});
+
+// decisions/009 — a local Ollama model goes ahead of Gemini only when OLLAMA_MODEL is set.
+describe("buildLLMClient", () => {
+  const baseConfig = {
+    OPEN_ROUTER_MODELS: "some/model:free",
+    OLLAMA_BASE_URL: "http://localhost:11434",
+  };
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  function geminiSuccess(text: string) {
+    return new Response(
+      JSON.stringify({ candidates: [{ content: { parts: [{ text }], role: "model" } }] }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  }
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("tries the Ollama model first when OLLAMA_MODEL is set", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ message: { content: '{"issues":[]}' } }), { status: 200 })
+    );
+    const client = buildLLMClient({ ...baseConfig, OLLAMA_MODEL: "qwen2.5-coder:7b" });
+
+    const result = await client.generateContent({ contents: [] });
+
+    expect(result.text).toBe('{"issues":[]}');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![0]).toBe("http://localhost:11434/api/chat");
+  });
+
+  it("falls through to Gemini without retrying when Ollama is unreachable", async () => {
+    fetchMock
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValueOnce(geminiSuccess('{"from":"gemini"}'));
+    const client = buildLLMClient({ ...baseConfig, OLLAMA_MODEL: "qwen2.5-coder:7b" });
+
+    const result = await client.generateContent({ contents: [] });
+
+    expect(result.text).toBe('{"from":"gemini"}');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1]![0])).toContain("generativelanguage.googleapis.com");
+  });
+
+  it("starts with Gemini and never calls Ollama when OLLAMA_MODEL is unset", async () => {
+    fetchMock.mockResolvedValue(geminiSuccess('{"from":"gemini"}'));
+    const client = buildLLMClient({ ...baseConfig, OLLAMA_MODEL: undefined });
+
+    await client.generateContent({ contents: [] });
+
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("generativelanguage.googleapis.com");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("11434"))).toBe(false);
   });
 });

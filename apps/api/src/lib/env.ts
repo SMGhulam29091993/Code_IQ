@@ -52,6 +52,14 @@ const envSchema = z.object({
     .min(1)
     .default("cohere/north-mini-code:free,minimax/minimax-m2.7:free,liquid/lfm-2.5-2.6b:free,nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free,dots-studio/dots-3-note-preview:free"),
 
+  // Ollama — optional local-development LLM tier (decisions/009). When OLLAMA_MODEL is set,
+  // lib/llm-client.ts's buildLLMClient puts it *ahead of* Gemini, so local development burns
+  // no free-tier quota at all; Gemini/OpenRouter remain the fallback if Ollama is down. Unset
+  // = chain unchanged. Rejected in production by the refine below — a localhost model is never
+  // a production dependency.
+  OLLAMA_BASE_URL: z.string().url().default("http://localhost:11434"),
+  OLLAMA_MODEL: z.string().min(1).optional(),
+
   // Stripe — billing module (.ai/plans/backend.md Step 6). Price IDs map 1:1 to
   // PlanTier ('FREE' has none — it's never checked out). See .ai/knowledge/domains/billing.md.
   STRIPE_SECRET_KEY: z.string().min(1),
@@ -61,6 +69,9 @@ const envSchema = z.object({
 }).refine((e) => e.JWT_SECRET !== e.JWT_REFRESH_SECRET, {
   message: "JWT_SECRET and JWT_REFRESH_SECRET must be different values (.ai/rules/security.md #5)",
   path: ["JWT_REFRESH_SECRET"],
+}).refine((e) => !(e.NODE_ENV === "production" && e.OLLAMA_MODEL), {
+  message: "OLLAMA_MODEL is a local-development tier only and must not be set in production (decisions/009)",
+  path: ["OLLAMA_MODEL"],
 });
 
 function loadEnv() {

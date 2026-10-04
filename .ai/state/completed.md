@@ -1,6 +1,27 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-10-04 (Local Ollama LLM tier for development — branch `feat/ollama-local-llm`)
+- New `apps/api/src/lib/ollama.ts` (`OllamaClient`, Adapter behind `ILLMClient`): native
+  `/api/chat`, `stream: false`, `format: "json"`, per-request `num_ctx: 16384`, 120s timeout.
+  Unreachable/timeout/4xx → non-retryable `LLMClientError` (falls through to Gemini at once);
+  5xx retryable.
+- `lib/llm-client.ts`'s `buildLLMClient()` prepends an `ollama:<model>` tier when `OLLAMA_MODEL`
+  is set; now takes an optional config param (defaults to `env`) so tier order is unit-testable.
+- `lib/env.ts`: `OLLAMA_BASE_URL` (default `http://localhost:11434`), optional `OLLAMA_MODEL`,
+  plus a refine that refuses to boot with `OLLAMA_MODEL` set in production.
+  `.env.example` documents both; `docker-compose.yml` points the `api` container at
+  `host.docker.internal:11434`. Local `apps/api/.env` (gitignored) set to `qwen2.5-coder:7b`.
+- Tests: new `ollama-client.test.ts` (6), 3 new `buildLLMClient` cases in `llm-client.test.ts`.
+  390/390 API tests pass; typecheck and lint clean. (Typecheck first failed on a stale generated
+  Prisma client — pitfall #017 — fixed by `prisma generate`, unrelated to this change. The test
+  run's one "unhandled error" is a Redis ECONNREFUSED with Docker not running; reproduced
+  identically with this change stashed — pre-existing, environmental.)
+- Live: real `GeminiService.reviewDiff` prompt through `buildLLMClient()` → `qwen2.5-coder:7b`
+  returned schema-valid JSON in ~13s (cold load included), no fallback triggered.
+- New ADR `decisions/009`; `knowledge/domains/review.md`, `knowledge/technical/backend/
+  architecture.md`, `project_context.md` updated.
+
 ## 2026-09-13 (Fast-fail + user-facing message on full LLM exhaustion — same branch `fix/llm-client-exhaustion-summary-log`)
 User-reported: when every LLM fallback tier (decisions/008 — Gemini + 5 OpenRouter free models)
 hits its free-tier quota mid-review, the review just sat in `RUNNING` for a long time with no

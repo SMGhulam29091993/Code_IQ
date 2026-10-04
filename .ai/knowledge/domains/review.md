@@ -672,6 +672,11 @@ describe('CommentService.postReview', () => {
   directly. Retry-with-backoff used to live inside `GeminiService` itself; it moved into this
   file's `RetryingLLMClient` so it applies uniformly regardless of provider, and so
   `GeminiService` could go back to just building prompts and parsing responses.
+- **Local Ollama tier in development (`decisions/009`, 2026-10-04):** when `OLLAMA_MODEL` is set
+  (never in production — `env.ts` refuses to boot), `buildLLMClient()` puts `lib/ollama.ts`'s
+  `OllamaClient` ahead of Gemini in the same fallback chain. Unreachable/timed-out/4xx Ollama is
+  non-retryable, so the chain falls straight through to Gemini. `GeminiService` and the job
+  processors are unchanged.
 - **Fast-fail on full LLM exhaustion (`decisions/008`'s 2026-09-13 addendum):**
   `FallbackLLMClient` throws a typed `lib/llm-client.ts` `AllTiersExhaustedError` once every tier
   fails, instead of rethrowing the last provider error. `jobs/review-chunk.job.ts` catches it,

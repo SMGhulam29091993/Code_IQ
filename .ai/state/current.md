@@ -1,6 +1,13 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
+## 2026-10-04 (Local Ollama LLM tier for development, on branch `feat/ollama-local-llm`)
+Per user request: the developer's local Ollama (`qwen2.5-coder:7b`) is now the first LLM tier in
+development, ahead of Gemini → OpenRouter, so local building/testing stops burning free-tier
+quota. New `lib/ollama.ts` adapter, opt-in via `OLLAMA_MODEL` (rejected in production at boot),
+`OLLAMA_BASE_URL` for Docker (`host.docker.internal`). Design + trade-offs: `decisions/009`.
+390/390 API tests, typecheck, lint clean; live-verified against the real local model. Not merged.
+
 ## 2026-09-13 (Fast-fail + user-facing message on full LLM exhaustion, on branch `fix/llm-client-exhaustion-summary-log`)
 User-reported UX bug, third piece of work on this same branch/ADR thread (decisions/008): when
 every LLM fallback tier hits its free-tier limit mid-review, the review used to sit in `RUNNING`
