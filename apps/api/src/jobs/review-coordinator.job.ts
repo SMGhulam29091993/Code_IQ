@@ -146,9 +146,9 @@ export class ReviewCoordinatorJobProcessor {
       const priority = await this.fairnessService.priorityFor(installationId);
 
       // 7. Fan out: one review-chunk job per chunk, under a review-finalize parent that BullMQ
-      // activates automatically once every child has settled. failParentOnFailure: false means
-      // one chunk exhausting its own retries doesn't block finalization — it's just a gap noted
-      // in the summary.
+      // activates automatically once every child has settled. ignoreDependencyOnFailure: true
+      // means one chunk exhausting its own retries (or stalling out) doesn't block finalization —
+      // it's just a gap noted in the summary.
       await this.flowProducer.add({
         name: "finalize-review",
         queueName: REVIEW_FINALIZE_QUEUE_NAME,
@@ -174,7 +174,12 @@ export class ReviewCoordinatorJobProcessor {
             priority,
             attempts: 3,
             backoff: { type: "exponential", delay: 2000 },
-            failParentOnFailure: false,
+            // NOT failParentOnFailure: false — that's just BullMQ's default, and under it a failed
+            // child stays an unresolved dependency, leaving the finalize parent in
+            // waiting-children forever (found live 2026-10-04, memory/pitfalls.md #021).
+            // ignoreDependencyOnFailure moves a child that fails after all its attempts (or
+            // stalls out) to the parent's failed dependencies, so finalize still runs.
+            ignoreDependencyOnFailure: true,
           },
         })),
       });

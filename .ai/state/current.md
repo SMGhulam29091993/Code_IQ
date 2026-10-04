@@ -1,6 +1,15 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
+## 2026-10-04 (Fix: reviews with any failed chunk never finalized — branch `feat/ollama-local-llm`)
+PR #15's review stuck `RUNNING`: chunk jobs stalled out on dev-server restarts, and the Flow
+parent never ran because `failParentOnFailure: false` doesn't do what decisions/007 assumed.
+Fixed on this branch (user's instruction: all fixes here, then push to re-trigger PR #15's
+review): `ignoreDependencyOnFailure: true` on chunk children, finalize counts non-DONE chunks as
+gaps, retry re-runs stalled `RUNNING` chunks. 408/408 tests. Pitfall #021, decisions/007 addendum.
+Merged into `feat/pr-review-status` the same day (together with `Dev`), so that branch now has
+the fix too.
+
 ## 2026-10-04 (PR in-progress status — branch `feat/pr-review-status`, cut from `feat/ollama-local-llm`)
 User-requested CodeRabbit-style "review in progress" on the GitHub PR page. User's choices: both
 signals (status comment + `CodeIQ Review` check run), live throttled progress, comment edited to a

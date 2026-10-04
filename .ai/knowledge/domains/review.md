@@ -235,7 +235,7 @@ processCoordinatorJob(job):
   priority = await fairnessService.priorityFor(installationId)
 
   // 7. Fan out: one review-chunk job per chunk under a review-finalize parent. BullMQ activates
-  // the parent automatically once every child has settled; failParentOnFailure: false means one
+  // the parent automatically once every child has settled; ignoreDependencyOnFailure: true means one
   // chunk exhausting its own retries doesn't block finalization.
   await flowProducer.add({
     name: 'finalize-review', queueName: 'review-finalize-queue',
@@ -243,7 +243,7 @@ processCoordinatorJob(job):
     children: chunkRows.map(row => ({
       name: 'review-chunk', queueName: 'review-chunk-queue',
       data: { reviewId: review.id, chunkId: row.id, installationId, filename: row.filename, patch: row.patch, repoConfig },
-      opts: { jobId: `${review.id}:${row.id}`, priority, attempts: 3, backoff: { type: 'exponential', delay: 2000 }, failParentOnFailure: false },
+      opts: { jobId: `${review.id}:${row.id}`, priority, attempts: 3, backoff: { type: 'exponential', delay: 2000 }, ignoreDependencyOnFailure: true },
     })),
   })
 
@@ -257,7 +257,7 @@ ON ANY UNHANDLED ERROR:
 One job per chunk — the actual LLM-call workload, and the one queue you scale horizontally by
 adding worker pods. Rate-limited fleet-wide via the queue's `Worker.limiter` (Redis-backed), not
 an in-process pool. `attempts: 3` on each job (set by whoever created the Flow) means a failed
-Gemini call gets BullMQ's own retry/backoff before this processor ever needs `failParentOnFailure`
+Gemini call gets BullMQ's own retry/backoff before this processor ever needs `ignoreDependencyOnFailure`
 to matter.
 
 ```
@@ -272,7 +272,7 @@ processChunkJob(job):
     reviewChunkRepo.markDone(chunkId)
   catch (err):
     reviewChunkRepo.markFailed(chunkId, String(err))
-    throw err   // lets BullMQ's attempts/backoff retry; failParentOnFailure:false means the
+    throw err   // lets BullMQ's attempts/backoff retry; ignoreDependencyOnFailure:true means the
                 // parent still proceeds once retries are exhausted
   finally:
     reviewRepo.incrementCompletedChunks(reviewId)  // UI progress only — may over-count across
@@ -293,7 +293,7 @@ processFinalizeJob(job):
   { reviewId, installationId, owner, repo, prNumber, prTitle, headSha, truncated } = job.data
 
   allChunks = reviewChunkRepo.findByReviewId(reviewId)
-  failedChunks = allChunks.filter(c => c.status === 'FAILED')
+  failedChunks = allChunks.filter(c => c.status !== 'DONE')   // stalled chunks stay RUNNING — still a gap (pitfall #021)
 
   if allChunks.length > 0 and failedChunks.length === allChunks.length:
     reviewRepo.update(reviewId, { status: 'FAILED' })   // no GitHub post — nothing succeeded
@@ -390,8 +390,9 @@ already loaded — a retry never re-runs the truncation decision, only the coord
 | Coordinator job re-delivered (same deliveryId) | BullMQ `jobId` dedup on `review-coordinator-queue` — second enqueue is a no-op |
 | Concurrent coordinator jobs for same PR | Last one wins (headSha differs → separate Review row) |
 | Retry | Re-enters the Flow directly with only non-`DONE` `ReviewChunk` rows as children — no diff re-fetch, no re-billing already-successful chunks |
+| Chunk job stalls out (worker process restarted mid-job) | BullMQ fails it without running its catch block, so its row stays `RUNNING`. `ignoreDependencyOnFailure` still lets finalize run; finalize counts every non-`DONE` chunk as a gap; retry's `findIncomplete` includes `RUNNING` rows so they re-run (pitfall #021) |
 | Retry where every chunk fails again | Review marked `FAILED` again, same as a fresh run |
-| One review-chunk job's Gemini call fails all 3 attempts | `failParentOnFailure: false` lets the finalize job run anyway once every sibling has also settled |
+| One review-chunk job's Gemini call fails all 3 attempts | `ignoreDependencyOnFailure: true` lets the finalize job run anyway once every sibling has also settled |
 
 ### Unit test cases
 ```typescript

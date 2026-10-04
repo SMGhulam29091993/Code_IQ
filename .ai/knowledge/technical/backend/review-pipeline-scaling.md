@@ -51,7 +51,7 @@ job and into the two new queues.
 BullMQ's `FlowProducer` gives parent/child jobs natively: the parent (`finalize-review`) only
 activates once every child (`review-chunk`) has settled. No hand-rolled "decrement a counter,
 check if zero" coordination and no race between the last chunk finishing and the finalize logic
-checking too early. `failParentOnFailure: false` on each child means one Gemini call failing
+checking too early. `ignoreDependencyOnFailure: true` on each child (originally, wrongly, `failParentOnFailure: false` — decisions/007's 2026-10-04 addendum) means one Gemini call failing
 (after its own retries) doesn't block the whole PR's summary — it just gets noted as a gap.
 
 ### Why fleet-wide rate limiting via `Worker.limiter`, not per-job pooling
@@ -182,7 +182,7 @@ processCoordinatorJob(job):
         priority,
         attempts: 3,
         backoff: { type: 'exponential', delay: 2000 },
-        failParentOnFailure: false,
+        ignoreDependencyOnFailure: true,   // NOT failParentOnFailure: false — see decisions/007 2026-10-04 addendum
       },
     })),
   })
@@ -207,7 +207,7 @@ processChunkJob(job):
     await reviewChunkRepo.update(chunkId, { status: 'DONE', completedAt: now() })
   catch (err):
     await reviewChunkRepo.update(chunkId, { status: 'FAILED', error: String(err) })
-    throw err   // lets BullMQ's attempts/backoff retry; failParentOnFailure:false means the
+    throw err   // lets BullMQ's attempts/backoff retry; ignoreDependencyOnFailure:true means the
                 // parent still proceeds once retries are exhausted
   finally:
     await reviewRepo.increment(reviewId, 'completedChunks', 1)   // UI progress only
@@ -267,7 +267,7 @@ retryReview(reviewId):
                                                             // old jobId is already DONE/terminal
                                                             // in BullMQ, needs a fresh one to re-run
         priority, attempts: 3, backoff: { type: 'exponential', delay: 2000 },
-        failParentOnFailure: false,
+        ignoreDependencyOnFailure: true,   // NOT failParentOnFailure: false — see decisions/007 2026-10-04 addendum
       },
     })),
   })
@@ -335,7 +335,7 @@ incomplete `ReviewChunk` rows as children, instead of going through `review-coor
 See `knowledge/domains/review.md` "Core pipeline" for the current (real) pseudocode and unit test
 list — that doc, not this one, is now the source of truth for pipeline *behavior*.
 **Not yet load-tested against a real large PR** — unit/integration-verified only
-(`pnpm test`, 328/328); real-PR load testing and `failParentOnFailure: false` verification under
+(`pnpm test`, 328/328); real-PR load testing and child-failure verification (now `ignoreDependencyOnFailure: true`, see decisions/007 addendum) under
 actual partial-chunk-failure conditions is still open before this is trusted at scale in
 production.
 

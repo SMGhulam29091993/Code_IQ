@@ -1,6 +1,16 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-10-04 (Fix: Flow parent blocked forever by any failed chunk — branch `feat/ollama-local-llm`)
+- Root cause of PR #15 (and earlier PR #10/#8) stuck `RUNNING`: chunk children used
+  `failParentOnFailure: false` (BullMQ's default — a failed child blocks the parent forever)
+  instead of `ignoreDependencyOnFailure: true`. Verified against bullmq 5.80.8's
+  `job-options.d.ts`. Triggered by chunk jobs stalling when `turbo run dev` restarted the API.
+- Fixed in `review-coordinator.job.ts` + `review.service.ts` (`retryReview`); `review-finalize.job.ts`
+  counts any non-DONE chunk as a gap (stalled rows stay `RUNNING`); `ReviewChunkRepository.
+  findIncomplete` includes `RUNNING`. 2 new finalize tests; 408/408, typecheck, lint clean.
+- Docs: decisions/007 addendum, pitfall #021, `review.md`, `review-pipeline-scaling.md`.
+
 ## 2026-10-04 (PR in-progress status comment + check run — branch `feat/pr-review-status`)
 - New `PrStatusService` (`modules/reviews/pr-status.service.ts`) + `PrStatusRepository`: status
   comment edited in place (in progress → throttled live progress → ✅ result w/ counts + review
