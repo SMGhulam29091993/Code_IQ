@@ -7,6 +7,13 @@ development, ahead of Gemini → OpenRouter, so local building/testing stops bur
 quota. New `lib/ollama.ts` adapter, opt-in via `OLLAMA_MODEL` (rejected in production at boot),
 `OLLAMA_BASE_URL` for Docker (`host.docker.internal`). Design + trade-offs: `decisions/009`.
 390/390 API tests, typecheck, lint clean; live-verified against the real local model. Not merged.
+First real pipeline run surfaced 3 bugs, fixed same day on the same branch (B→A→C, one commit
+each): inline comments only on lines inside the PR diff (`91de00c`, pitfall #019), serialized
+Ollama requests + `OLLAMA_TIMEOUT_MS` (`631f2bf`, decisions/009 addendum), plain-string
+failed-job logging (`509ad29`, pitfall #020). 406/406 tests. PR #10's review
+(`cmtyeetbv0000jtfthgcswo08`) is still stuck `RUNNING` after its finalize 422'd — needs a
+retry to post; PR #8's fresh run (`cmuth68bu0000yyftfho4wol0`) was mid-flight when these fixes
+landed.
 
 ## 2026-09-13 (Fast-fail + user-facing message on full LLM exhaustion, on branch `fix/llm-client-exhaustion-summary-log`)
 User-reported UX bug, third piece of work on this same branch/ADR thread (decisions/008): when

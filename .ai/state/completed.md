@@ -1,6 +1,25 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-10-04 (Fixes from the first real Ollama pipeline run — branch `feat/ollama-local-llm`)
+Re-ran the two real stuck reviews (PR #10 resumable retry of its 8 failed chunks; PR #8 as a
+fresh coordinator job, since a 0-chunk retry would post a false "no issues" review). The 4
+`seed_*` PENDING/RUNNING reviews were skipped — fake installations/repos/SHAs, no diff exists.
+Three bugs surfaced, fixed in the user's chosen order B→A→C:
+- **B** `91de00c` — `CommentService.postReview` posted LLM line numbers verbatim; one line
+  outside the diff 422'd the whole review ("Line could not be resolved"). Now parses the PR's
+  patches (`parseCommentableLines`, manual `pulls.listFiles` paging — `octokit.paginate` doesn't
+  typecheck under the pinned Octokit v19) and lists unanchored issues under "Other findings".
+  Pitfall #019.
+- **A** `631f2bf` — concurrent chunk jobs queued inside Ollama and hit the 120s timeout before
+  inference began (worse with two API processes running). `OllamaClient` now serializes
+  requests; timeout starts on send, default 300s via `OLLAMA_TIMEOUT_MS`; timeout vs
+  unreachable reported distinctly. decisions/009 addendum.
+- **C** `509ad29` — the worker "failed" handler's `console.error(msg, err)` threw inside
+  `util.inspect`, hiding the real error. Now logs `formatJobError(err)` (stack + cause string,
+  never throws). Pitfall #020.
+- 406/406 API tests, typecheck, lint clean.
+
 ## 2026-10-04 (Local Ollama LLM tier for development — branch `feat/ollama-local-llm`)
 - New `apps/api/src/lib/ollama.ts` (`OllamaClient`, Adapter behind `ILLMClient`): native
   `/api/chat`, `stream: false`, `format: "json"`, per-request `num_ctx: 16384`, 120s timeout.
