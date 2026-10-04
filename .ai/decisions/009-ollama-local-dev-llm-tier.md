@@ -52,3 +52,24 @@ structure from decisions/008 — this is one more adapter and one more tier.
 
 **Applies to:** backend (`apps/api/src/lib/ollama.ts`, `apps/api/src/lib/llm-client.ts`,
 `apps/api/src/lib/env.ts`, `apps/api/.env.example`, `apps/api/docker-compose.yml`)
+
+## Addendum (2026-10-04): serialize requests, timeout measures inference only
+
+The first real pipeline run against `qwen2.5-coder:7b` hit
+`Ollama ... unreachable: TimeoutError` on many chunks even though Ollama was healthy (`ollama ps`
+showed the model loaded on GPU). Cause: the chunk worker runs up to 10 jobs concurrently
+(`CHUNK_WORKER_POD_CONCURRENCY`) — doubled that session by two API processes running at once —
+while a local Ollama only works through a few requests at a time. Requests waiting in Ollama's
+own queue counted against the 120s `AbortSignal.timeout`, so they "timed out" before inference
+ever started.
+
+**Decision:** `OllamaClient` serializes its own requests (one in flight per instance — i.e. per
+API process, since `llmClient` is a singleton), so the timeout starts only when a request is
+actually sent. Default timeout raised to 300s, overridable via `OLLAMA_TIMEOUT_MS`. Timeout and
+connection failure now produce distinct messages (`timed out after Nms` vs `unreachable at
+<url>`) — the old "unreachable" wording for a timeout pointed at the wrong fix.
+
+**Consequence:** in dev, chunk jobs for a large PR now wait on each other in-process rather than
+in Ollama — total wall-clock time is the same (Ollama was the bottleneck either way), but no
+chunk fails just for having waited. Running two API processes against one Redis still doubles
+the queue consumers; run only one locally.

@@ -7,9 +7,9 @@ import type { ILLMClient } from "../modules/reviews/review.types";
 // so it's set per-request rather than relying on whatever the local Modelfile happens to say.
 const NUM_CTX = 16_384;
 
-// A 7B model on a laptop can take tens of seconds on a large chunk; past this, fall through to
-// the next tier instead of holding the chunk job (and its BullMQ lock) indefinitely.
-const REQUEST_TIMEOUT_MS = 120_000;
+// A 7B model on a laptop can take tens of seconds — sometimes minutes — on a large chunk; past
+// this, fall through to the next tier. Overridable via OLLAMA_TIMEOUT_MS (env.ts).
+export const DEFAULT_OLLAMA_TIMEOUT_MS = 300_000;
 
 // Adapter — local-development LLM tier (decisions/009). Translates ILLMClient's
 // {systemInstruction, contents} request into Ollama's native /api/chat body and its response
@@ -22,13 +22,32 @@ const REQUEST_TIMEOUT_MS = 120_000;
 // itself within a backoff window, so those are non-retryable — FallbackLLMClient moves straight
 // on to Gemini instead of RetryingLLMClient burning its backoff delays on a dead localhost.
 // Only a 5xx (e.g. the model runner crashing mid-request) is worth a retry.
+//
+// Requests are serialized per instance (one in flight at a time). Found live 2026-10-04: the
+// chunk worker runs up to 10 jobs concurrently (jobs/worker.ts), a local Ollama works through
+// them a few at a time, and the requests waiting in Ollama's own queue hit the timeout before
+// it ever started on them — reported as timeouts against a perfectly healthy server. Queuing
+// here instead means the timeout clock only starts once a request is actually sent, so it
+// measures inference time, not time spent waiting behind other chunks.
 export class OllamaClient implements ILLMClient {
+  private tail: Promise<unknown> = Promise.resolve();
+
   constructor(
     private readonly baseUrl: string,
-    private readonly model: string
+    private readonly model: string,
+    private readonly timeoutMs: number = DEFAULT_OLLAMA_TIMEOUT_MS
   ) {}
 
-  async generateContent(
+  generateContent(
+    request: Parameters<ILLMClient["generateContent"]>[0]
+  ): ReturnType<ILLMClient["generateContent"]> {
+    const run = this.tail.then(() => this.send(request));
+    // Keep the chain alive past a failed request — the next caller still gets its turn.
+    this.tail = run.catch(() => undefined);
+    return run;
+  }
+
+  private async send(
     request: Parameters<ILLMClient["generateContent"]>[0]
   ): ReturnType<ILLMClient["generateContent"]> {
     const messages = [
@@ -53,12 +72,16 @@ export class OllamaClient implements ILLMClient {
           format: "json",
           options: { num_ctx: NUM_CTX, temperature: 0.2 },
         }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch (err) {
-      // Connection refused (Ollama not running) or the timeout above firing.
+      // Either the timeout above fired, or the connection itself failed (Ollama not running).
+      // Both are non-retryable, but the message says which — they need different fixes.
+      const timedOut = (err as { name?: string } | undefined)?.name === "TimeoutError";
       throw new LLMClientError(
-        `Ollama (${this.model}) unreachable at ${this.baseUrl}: ${String(err)}`,
+        timedOut
+          ? `Ollama (${this.model}) timed out after ${this.timeoutMs}ms`
+          : `Ollama (${this.model}) unreachable at ${this.baseUrl}: ${String(err)}`,
         undefined,
         null,
         false

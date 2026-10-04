@@ -90,4 +90,56 @@ describe("OllamaClient", () => {
 
     await expect(client.generateContent({ contents: [] })).rejects.toBeInstanceOf(LLMClientError);
   });
+
+  it("reports a timeout distinctly from an unreachable server", async () => {
+    fetchMock.mockRejectedValue(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+    const client = new OllamaClient("http://localhost:11434", "m", 5_000);
+
+    const err = await client.generateContent({ contents: [] }).catch((e) => e);
+
+    expect(err.message).toBe("Ollama (m) timed out after 5000ms");
+    expect(err.retryable).toBe(false);
+  });
+
+  it("names the base URL when the connection itself fails", async () => {
+    fetchMock.mockRejectedValue(new TypeError("fetch failed"));
+    const client = new OllamaClient("http://localhost:11434", "m");
+
+    const err = await client.generateContent({ contents: [] }).catch((e) => e);
+
+    expect(err.message).toContain("unreachable at http://localhost:11434");
+  });
+
+  // Found live 2026-10-04: concurrent chunk jobs queued inside Ollama and timed out while
+  // waiting. Requests are now sent one at a time, so the timeout only measures inference.
+  it("sends one request at a time, starting the next only after the previous settles", async () => {
+    let releaseFirst!: (r: Response) => void;
+    fetchMock
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => (releaseFirst = resolve)))
+      .mockResolvedValueOnce(jsonResponse({ message: { content: "second" } }));
+    const client = new OllamaClient("http://localhost:11434", "m");
+
+    const first = client.generateContent({ contents: [] });
+    const second = client.generateContent({ contents: [] });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    releaseFirst(jsonResponse({ message: { content: "first" } }));
+    expect((await first).text).toBe("first");
+    expect((await second).text).toBe("second");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("still serves the next queued request after one fails", async () => {
+    fetchMock
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValueOnce(jsonResponse({ message: { content: "ok" } }));
+    const client = new OllamaClient("http://localhost:11434", "m");
+
+    const first = client.generateContent({ contents: [] }).catch((e) => e);
+    const second = client.generateContent({ contents: [] });
+
+    expect(await first).toBeInstanceOf(LLMClientError);
+    expect((await second).text).toBe("ok");
+  });
 });

@@ -59,6 +59,9 @@ const envSchema = z.object({
   // a production dependency.
   OLLAMA_BASE_URL: z.string().url().default("http://localhost:11434"),
   OLLAMA_MODEL: z.string().min(1).optional(),
+  // Per-request inference timeout (ms) — counted from when the request is actually sent, not
+  // while it waits behind other chunks (lib/ollama.ts serializes requests).
+  OLLAMA_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
 
   // Stripe — billing module (.ai/plans/backend.md Step 6). Price IDs map 1:1 to
   // PlanTier ('FREE' has none — it's never checked out). See .ai/knowledge/domains/billing.md.
