@@ -317,6 +317,37 @@ processFinalizeJob(job):
   })
 ```
 
+### prStatusService (`modules/reviews/pr-status.service.ts`) — in-progress signals on the PR
+
+CodeRabbit-style feedback on the PR page while a review runs (added 2026-10-04). Two independent,
+best-effort signals — every GitHub call is caught and logged, never thrown, so neither can fail
+the review it reports on:
+
+1. **Status comment** (issue comment, hidden `<!-- codeiq-status -->` marker), edited in place:
+   `🔄 CodeIQ review in progress` → `Progress: N / M sections analysed` → `✅ CodeIQ review
+   complete` (severity counts + link to the posted review) or `❌ could not be completed`
+   (FREE_TIER_EXHAUSTED gets the quota message). Needs only `pull_requests: write`.
+2. **`CodeIQ Review` check run** on the head commit: `in_progress` → `completed`. Conclusion is
+   `success` whenever a review was posted (regardless of findings) and `neutral` when it
+   couldn't complete — **never `failure`**, so branch protection can't turn CodeIQ into a merge
+   gate (`event: 'COMMENT'` stance, `memory/lessons.md` #001). Needs the GitHub App's
+   **Checks: Read & write** permission; without it the 403 is logged once per process and the
+   comment still works.
+
+| Pipeline point | Call |
+|---|---|
+| Coordinator, after resolving repo context, before fan-out | `start(reviewId)` — creates the comment (or resets it on a retry) and a new check run (closing any previous one as "Superseded") |
+| Coordinator: no reviewable files | `complete(reviewId, { githubReviewId: null, note })` |
+| Coordinator throws | `fail(reviewId, null)` (reset by `start` if BullMQ retries) |
+| Each chunk job's `finally` | `progress(reviewId)` — throttled to one GitHub edit per review per 15s (Redis `SET … NX EX 15`); counts real `ReviewChunk` DONE+FAILED rows, not the over-counting `completedChunks` |
+| Finalize: all chunks failed | `fail(reviewId, failureReason)` |
+| Finalize: `postReview` throws | `fail(reviewId, null)`, then rethrow |
+| Finalize: posted | `complete(reviewId, { githubReviewId, critical, warning, info })` |
+| `POST /reviews/:id/retry` | `start(reviewId)` |
+
+Comment/check-run ids live on `Review.githubStatusCommentId`/`githubCheckRunId` (BigInt, via the
+narrow `PrStatusRepository`).
+
 ### fairnessService (`lib/fairness.ts`) — per-installation fair queuing (decisions/007 Phase 4)
 
 Substitute for BullMQ Pro's paid per-group rate limiting: track each installation's currently

@@ -1,6 +1,25 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-10-04 (PR in-progress status comment + check run — branch `feat/pr-review-status`)
+- New `PrStatusService` (`modules/reviews/pr-status.service.ts`) + `PrStatusRepository`: status
+  comment edited in place (in progress → throttled live progress → ✅ result w/ counts + review
+  link, or ❌ reason) and a `CodeIQ Review` check run (`success` when posted, `neutral` on
+  failure — never `failure`, non-blocking stance). All calls best-effort; check-run 403 (missing
+  Checks permission) logged once per process. Previous check run closed as "Superseded" on
+  retry. Progress throttled via Redis `SET NX EX 15`, counted from real ReviewChunk rows.
+- Hooked into `review-coordinator.job.ts` (start / no-files complete / fail), `review-chunk.job.ts`
+  (progress in `finally`), `review-finalize.job.ts` (complete / all-failed fail / post-failure
+  fail), `ReviewService.retryReview` (start); wired in `container.ts`.
+- Schema: `Review.githubStatusCommentId`/`githubCheckRunId` BigInt?, migration
+  `20261004140000_add_review_pr_status_ids`. Also recorded the hand-applied
+  `20260913120000_add_review_failure_reason` via `migrate resolve --applied` (pitfall #018) —
+  `migrate diff` now reports no drift.
+- Tests: new `pr-status.service.test.ts` (17), hook tests in coordinator (3), chunk (1),
+  finalize (3), review.service (1). 429/429, typecheck, lint clean.
+- Docs: `knowledge/domains/review.md` (prStatusService section), `knowledge/domains/github-app.md`
+  (Required App permissions table), `plans/database.md`.
+
 ## 2026-10-04 (Fixes from the first real Ollama pipeline run — branch `feat/ollama-local-llm`)
 Re-ran the two real stuck reviews (PR #10 resumable retry of its 8 failed chunks; PR #8 as a
 fresh coordinator job, since a 0-chunk retry would post a false "no issues" review). The 4

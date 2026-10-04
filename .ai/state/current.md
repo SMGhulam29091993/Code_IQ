@@ -1,6 +1,17 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
+## 2026-10-04 (PR in-progress status — branch `feat/pr-review-status`, cut from `feat/ollama-local-llm`)
+User-requested CodeRabbit-style "review in progress" on the GitHub PR page. User's choices: both
+signals (status comment + `CodeIQ Review` check run), live throttled progress, comment edited to a
+result line at the end. New `modules/reviews/pr-status.{service,repository}.ts`, hooked into the
+coordinator/chunk/finalize jobs and `retryReview`; migration
+`20261004140000_add_review_pr_status_ids`. 429/429 API tests, typecheck, lint clean. **Not yet
+live-verified on a real PR.** Check run needs the GitHub App's Checks: Read & write — not granted
+yet (confirmed via `GET /app`); the comment works with today's permissions.
+Also this session: all `Review` rows except PR #15's (`cmuthzama000l8dft9aytcz58`) deleted per
+user request, after removing their queued BullMQ jobs.
+
 ## 2026-10-04 (Local Ollama LLM tier for development, on branch `feat/ollama-local-llm`)
 Per user request: the developer's local Ollama (`qwen2.5-coder:7b`) is now the first LLM tier in
 development, ahead of Gemini → OpenRouter, so local building/testing stops burning free-tier

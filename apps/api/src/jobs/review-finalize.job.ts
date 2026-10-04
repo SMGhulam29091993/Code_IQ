@@ -5,6 +5,7 @@ import type { IInstallationRepository } from "../modules/github/github.types";
 import type {
   ICommentService,
   IGeminiService,
+  IPrStatusService,
   IReviewChunkRepository,
   IReviewIssueRepository,
   IReviewRepository,
@@ -27,7 +28,8 @@ export class ReviewFinalizeJobProcessor {
     private readonly reviewChunkRepo: IReviewChunkRepository,
     private readonly installationRepo: IInstallationRepository,
     private readonly geminiService: IGeminiService,
-    private readonly commentService: ICommentService
+    private readonly commentService: ICommentService,
+    private readonly prStatus: IPrStatusService
   ) {}
 
   async process(job: Job<ReviewFinalizeJobData>): Promise<void> {
@@ -51,6 +53,7 @@ export class ReviewFinalizeJobProcessor {
         status: "FAILED",
         failureReason: exhausted ? "FREE_TIER_EXHAUSTED" : null,
       });
+      await this.prStatus.fail(reviewId, exhausted ? "FREE_TIER_EXHAUSTED" : null);
       return;
     }
 
@@ -69,20 +72,35 @@ export class ReviewFinalizeJobProcessor {
     }
     const octokit = getInstallationOctokit(installation.githubInstallationId);
 
-    const githubReviewId = await this.commentService.postReview(octokit, {
-      owner,
-      repo,
-      prNumber,
-      headSha,
-      issues: allIssues,
-      summary,
-    });
+    let githubReviewId: number;
+    try {
+      githubReviewId = await this.commentService.postReview(octokit, {
+        owner,
+        repo,
+        prNumber,
+        headSha,
+        issues: allIssues,
+        summary,
+      });
+    } catch (err) {
+      // Keep the PR's status comment honest instead of leaving it at "in progress" — if BullMQ
+      // retries this job and the post succeeds, complete() below overwrites it.
+      await this.prStatus.fail(reviewId, null);
+      throw err;
+    }
 
     await this.reviewRepo.update(reviewId, {
       status: "DONE",
       summary,
       filesReviewed: new Set(doneChunks.map((chunk) => chunk.filename)).size,
       githubReviewId,
+    });
+
+    await this.prStatus.complete(reviewId, {
+      githubReviewId,
+      critical: allIssues.filter((i) => i.severity === "critical").length,
+      warning: allIssues.filter((i) => i.severity === "warning").length,
+      info: allIssues.filter((i) => i.severity === "info").length,
     });
   }
 }

@@ -6,6 +6,7 @@ import { resolveReviewContext } from "../modules/reviews/resolve-review-context"
 import type {
   IDiffService,
   IFairnessService,
+  IPrStatusService,
   IReviewChunkRepository,
   IReviewRepository,
   ReviewChunkRow,
@@ -35,7 +36,8 @@ export class ReviewCoordinatorJobProcessor {
     private readonly diffService: IDiffService,
     private readonly reviewChunkRepo: IReviewChunkRepository,
     private readonly fairnessService: IFairnessService,
-    private readonly flowProducer: FlowProducer
+    private readonly flowProducer: FlowProducer,
+    private readonly prStatus: IPrStatusService
   ) {}
 
   async process(job: Job<ReviewCoordinatorJobData>): Promise<void> {
@@ -78,6 +80,10 @@ export class ReviewCoordinatorJobProcessor {
         this.configService
       );
 
+      // "Review in progress" comment + check run on the PR (pr-status.service.ts) — best-effort,
+      // never throws. Before fan-out, so chunk jobs' progress updates find the ids it saves.
+      await this.prStatus.start(review.id);
+
       // An earlier attempt of this same job (existingReview above) may have already fetched,
       // chunked, and persisted ReviewChunk rows before failing — e.g. exactly the `:` jobId bug
       // this file used to have, which failed at flowProducer.add *after* chunks were already
@@ -108,6 +114,13 @@ export class ReviewCoordinatorJobProcessor {
             status: "DONE",
             summary: "No reviewable files in this PR.",
             filesReviewed: 0,
+          });
+          await this.prStatus.complete(review.id, {
+            githubReviewId: null,
+            critical: 0,
+            warning: 0,
+            info: 0,
+            note: "No reviewable files in this PR (everything matched the ignore patterns, was binary, or was deleted).",
           });
           return;
         }
@@ -167,6 +180,8 @@ export class ReviewCoordinatorJobProcessor {
       });
     } catch (err) {
       await this.reviewRepo.update(review.id, { status: "FAILED" });
+      // Reset to "in progress" by start() if BullMQ retries this job.
+      await this.prStatus.fail(review.id, null);
       throw err; // BullMQ retries (max 3 attempts, exponential backoff — see jobs/worker.ts).
     }
   }

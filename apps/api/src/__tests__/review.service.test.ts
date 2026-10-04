@@ -14,6 +14,13 @@ import type {
   ReviewWithOwner,
 } from "../modules/reviews/review.types";
 
+// pr-status.service.ts is best-effort and fully mocked here — its own behavior is covered by
+// pr-status.service.test.ts.
+function buildPrStatus() {
+  return { start: vi.fn(), progress: vi.fn(), complete: vi.fn(), fail: vi.fn() };
+}
+let prStatus: ReturnType<typeof buildPrStatus>;
+
 vi.mock("../jobs/queue", () => ({
   reviewCoordinatorQueue: { add: vi.fn() },
   reviewFlowProducer: { add: vi.fn() },
@@ -51,6 +58,8 @@ function buildReview(overrides: Partial<Review> = {}): Review {
     truncated: false,
     failureReason: null,
     coordinatorJobId: null,
+    githubStatusCommentId: null,
+    githubCheckRunId: null,
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,
@@ -150,13 +159,15 @@ describe("ReviewService", () => {
     } as unknown as ConfigService;
     fairnessService = { priorityFor: vi.fn().mockResolvedValue(1), markInFlight: vi.fn() };
 
+    prStatus = buildPrStatus();
     service = new ReviewService(
       reviewRepo,
       repoRepo,
       reviewChunkRepo,
       installationRepo,
       configService,
-      fairnessService
+      fairnessService,
+      prStatus
     );
   });
 
@@ -310,6 +321,17 @@ describe("ReviewService", () => {
   });
 
   describe("retryReview", () => {
+    it("resets the PR status to in progress when a retry starts", async () => {
+      vi.mocked(reviewRepo.findById).mockResolvedValue(buildOwnedReview({ status: "FAILED" }));
+      vi.mocked(repoRepo.findByIdForUser).mockResolvedValue(buildOwnedRepo());
+      vi.mocked(reviewRepo.update).mockResolvedValue(buildReview({ status: "RUNNING" }));
+      vi.mocked(reviewChunkRepo.findIncomplete).mockResolvedValue([buildChunk({ id: "chunk-1" })]);
+
+      await service.retryReview("user-1", "review-1");
+
+      expect(prStatus.start).toHaveBeenCalledWith("review-1");
+    });
+
     it("resets status to RUNNING and re-enters the Flow with only its incomplete chunks", async () => {
       vi.mocked(reviewRepo.findById).mockResolvedValue(buildOwnedReview({ status: "FAILED" }));
       vi.mocked(repoRepo.findByIdForUser).mockResolvedValue(buildOwnedRepo());

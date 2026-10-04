@@ -271,6 +271,14 @@ export const getInstallationOctokit = async (githubInstallationId: number) => {
 
 ---
 
+## Required App permissions
+
+| Permission | Level | Used for |
+|---|---|---|
+| Pull requests | Read & write | Reading diffs, posting the review, and the in-progress status comment (`review.md` "prStatusService") |
+| Contents | Read | `.codeiq.yml` |
+| Checks | Read & write | **Optional** — the `CodeIQ Review` check run. Added 2026-10-04; until an installation accepts it, check-run calls 403 and are skipped (logged once per process). Enable under the App's settings → Permissions, then accept the update on each installation. |
+
 ## Implementation notes (discovered during Step 3)
 
 - **Octokit version pinned to v19 / auth-app v6.** `@octokit/rest@20+` and `@octokit/auth-app@7+`

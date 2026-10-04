@@ -14,6 +14,13 @@ import type {
   ReviewChunkJobData,
 } from "../modules/reviews/review.types";
 
+// pr-status.service.ts is best-effort and fully mocked here — its own behavior is covered by
+// pr-status.service.test.ts.
+function buildPrStatus() {
+  return { start: vi.fn(), progress: vi.fn(), complete: vi.fn(), fail: vi.fn() };
+}
+let prStatus: ReturnType<typeof buildPrStatus>;
+
 const DEFAULT_CONFIG: SanitizedRepoConfig = {
   severityThreshold: "WARNING",
   enabledCategories: ["bug", "security", "performance", "logic"],
@@ -84,13 +91,15 @@ describe("ReviewChunkJobProcessor.process", () => {
       markExhausted: vi.fn(),
     };
 
+    prStatus = buildPrStatus();
     processor = new ReviewChunkJobProcessor(
       reviewRepo,
       reviewIssueRepo,
       reviewChunkRepo,
       geminiService,
       fairnessService,
-      llmExhaustionService
+      llmExhaustionService,
+      prStatus
     );
   });
 
@@ -194,5 +203,15 @@ describe("ReviewChunkJobProcessor.process", () => {
 
       expect(err).not.toBeInstanceOf(UnrecoverableError);
     });
+  });
+
+  it("reports PR status progress after the chunk settles, on success or failure", async () => {
+    await processor.process(buildJob());
+    expect(prStatus.progress).toHaveBeenCalledWith(buildJob().data.reviewId);
+
+    prStatus.progress.mockClear();
+    vi.mocked(geminiService.reviewDiff).mockRejectedValueOnce(new Error("boom"));
+    await expect(processor.process(buildJob())).rejects.toThrow();
+    expect(prStatus.progress).toHaveBeenCalledTimes(1);
   });
 });
