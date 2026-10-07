@@ -1,6 +1,21 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
+## 2026-10-07 (Fixing what PR #15/#16's own CodeIQ reviews surfaced — branch `feat/pr-review-status`)
+Both PRs were re-reviewed (49 + 39 inline comments). Triaged against the code: nearly all were
+7B-model false positives, but 5 real problems came out of it, fixed one at a time:
+1. **Stale `api-api-1` Docker container** (image from 2026-09-06) was consuming the same BullMQ
+   queues as `turbo run dev`, so some jobs ran month-old code — the reason both reviews posted to
+   GitHub yet their rows stayed `RUNNING` with no `githubReviewId`. Stopped. Rebuilding the image
+   still fails on npm `ECONNRESET` inside Docker; run only `turbo run dev` locally until it builds.
+2. `b01ef0b` — LLM output limits now truncate instead of rejecting (a >200-char Qwen message had
+   failed a whole chunk with Zod `too_big`; `.max(50)` issues likewise).
+3. `ee0681a` — finalize de-duplicates issues by file + message (PR #16 had 19 copies of one).
+4. Pending, user's call: `.codeiq.yml` ignoring `.ai/**` / `*.md` — ~60% of comments were on docs.
+5. This file's stale PR #10/#8 note (flagged by both reviews) — corrected below.
+Not pushed (no SSH key in this session). Review rows for #15/#16 still say `RUNNING` (artifact of
+(1)); a fresh run after pushing replaces them.
+
 ## 2026-10-04 (Fix: reviews with any failed chunk never finalized — branch `feat/ollama-local-llm`)
 PR #15's review stuck `RUNNING`: chunk jobs stalled out on dev-server restarts, and the Flow
 parent never ran because `failParentOnFailure: false` doesn't do what decisions/007 assumed.
@@ -15,8 +30,9 @@ User-requested CodeRabbit-style "review in progress" on the GitHub PR page. User
 signals (status comment + `CodeIQ Review` check run), live throttled progress, comment edited to a
 result line at the end. New `modules/reviews/pr-status.{service,repository}.ts`, hooked into the
 coordinator/chunk/finalize jobs and `retryReview`; migration
-`20261004140000_add_review_pr_status_ids`. 429/429 API tests, typecheck, lint clean. **Not yet
-live-verified on a real PR.** Check run needs the GitHub App's Checks: Read & write — not granted
+`20261004140000_add_review_pr_status_ids`. 429/429 API tests, typecheck, lint clean. Status
+comment live-verified on PR #15 (2026-10-07 — comment posted); the check run is still
+unverified. Check run needs the GitHub App's Checks: Read & write — not granted
 yet (confirmed via `GET /app`); the comment works with today's permissions.
 Also this session: all `Review` rows except PR #15's (`cmuthzama000l8dft9aytcz58`) deleted per
 user request, after removing their queued BullMQ jobs.
@@ -30,10 +46,9 @@ quota. New `lib/ollama.ts` adapter, opt-in via `OLLAMA_MODEL` (rejected in produ
 First real pipeline run surfaced 3 bugs, fixed same day on the same branch (B→A→C, one commit
 each): inline comments only on lines inside the PR diff (`91de00c`, pitfall #019), serialized
 Ollama requests + `OLLAMA_TIMEOUT_MS` (`631f2bf`, decisions/009 addendum), plain-string
-failed-job logging (`509ad29`, pitfall #020). 406/406 tests. PR #10's review
-(`cmtyeetbv0000jtfthgcswo08`) is still stuck `RUNNING` after its finalize 422'd — needs a
-retry to post; PR #8's fresh run (`cmuth68bu0000yyftfho4wol0`) was mid-flight when these fixes
-landed.
+failed-job logging (`509ad29`, pitfall #020). 406/406 tests. (Resolved since: PR #10's stuck
+review was retried and posted on 2026-10-04, then deleted with every other old review row the
+same day per user request; PR #8's run was cancelled. Neither exists any more.)
 
 ## 2026-09-13 (Fast-fail + user-facing message on full LLM exhaustion, on branch `fix/llm-client-exhaustion-summary-log`)
 User-reported UX bug, third piece of work on this same branch/ADR thread (decisions/008): when
