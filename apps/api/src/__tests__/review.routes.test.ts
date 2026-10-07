@@ -40,6 +40,7 @@ vi.mock("../jobs/queue", () => ({
   reviewFlowProducer: { add: vi.fn() },
   REVIEW_CHUNK_QUEUE_NAME: "review-chunk-queue",
   REVIEW_FINALIZE_QUEUE_NAME: "review-finalize-queue",
+  FINALIZE_JOB_OPTS: { attempts: 3, backoff: { type: "exponential", delay: 10_000 } },
 }));
 
 const NOW = new Date("2026-01-01T00:00:00Z");

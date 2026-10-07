@@ -83,7 +83,9 @@ model RepoConfig {
   repo               Repo     @relation(fields: [repoId], references: [id], onDelete: Cascade)
   severityThreshold  String   @default("WARNING") // CRITICAL | WARNING | INFO
   enabledCategories  String[] @default(["bug", "security", "performance", "logic"])
-  ignorePatterns     String[] @default(["*.test.ts", "*.spec.ts", "dist/**"])
+  // Must equal DEFAULT_REPO_CONFIG.ignorePatterns (apps/api/src/modules/repos/repo.types.ts).
+  // Was missing "node_modules/**" until migration 20261008100000 (memory/pitfalls.md #010).
+  ignorePatterns     String[] @default(["*.test.ts", "*.spec.ts", "dist/**", "node_modules/**"])
   reviewOnDraft      Boolean  @default(false)
   postSummaryComment Boolean  @default(true)
   updatedAt          DateTime @updatedAt

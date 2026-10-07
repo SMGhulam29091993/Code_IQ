@@ -249,6 +249,42 @@ describe("CommentService.postReview", () => {
   });
 });
 
+describe("CommentService.postReview with postSummaryComment disabled", () => {
+  const service = new CommentService();
+  const base = { owner: "acme", repo: "widgets", prNumber: 5, headSha: "abc123", summary: "Overall summary text." };
+
+  it("posts the inline comments without the PR-level summary or severity table", async () => {
+    const octokit = buildOctokit();
+    await service.postReview(octokit, { ...base, issues: [buildIssue()], includeSummary: false });
+
+    const call = vi.mocked(octokit.pulls.createReview).mock.calls[0]![0]!;
+    expect(call.comments).toHaveLength(1);
+    expect(call.body).toBe("");
+  });
+
+  it("still lists findings that can't be posted inline", async () => {
+    const octokit = buildOctokit();
+    await service.postReview(octokit, {
+      ...base,
+      issues: [buildIssue({ file: "src/not-in-pr.ts", line: 3, message: "Unanchored" })],
+      includeSummary: false,
+    });
+
+    const call = vi.mocked(octokit.pulls.createReview).mock.calls[0]![0]!;
+    expect(call.body).not.toContain("## CodeIQ Review");
+    expect(call.body!.startsWith("### Other findings")).toBe(true);
+    expect(call.body).toContain("Unanchored");
+  });
+
+  it("posts nothing and returns null when there are no findings at all", async () => {
+    const octokit = buildOctokit();
+    const id = await service.postReview(octokit, { ...base, issues: [], includeSummary: false });
+
+    expect(id).toBeNull();
+    expect(octokit.pulls.createReview).not.toHaveBeenCalled();
+  });
+});
+
 describe("parseCommentableLines", () => {
   it("collects added and context lines from the hunk header's new-file start", () => {
     const patch = ["@@ -10,4 +20,5 @@", " context", "-removed", "+added", " context", "+added"].join("\n");

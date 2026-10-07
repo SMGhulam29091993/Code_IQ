@@ -301,8 +301,8 @@ export const getInstallationOctokit = async (githubInstallationId: number) => {
   `githubRepoId`, never moves a repo to a different `installationId` on conflict):
   1. **`POST /github/install`** (`github.service.ts`) — right after the `Installation` upsert,
      `GithubService.syncRepos` calls the new `IGithubApiClient.listInstallationRepos` (Octokit
-     `apps.listReposAccessibleToInstallation`, single page of up to 100 repos — no pagination
-     loop yet, revisit if an installation with 100+ repos shows up) and upserts a `Repo` row per
+     `apps.listReposAccessibleToInstallation`, **every page** of 100 — paged since 2026-10-08;
+     it used to read only the first page, so repos 101+ never got `Repo` rows) and upserts a `Repo` row per
      result, `isActive` defaulting to `false` per the Prisma schema. This is **best-effort**: a
      GitHub API failure here is caught and swallowed (returns a synced count of 0) rather than
      failing the install response, since the `Installation` row is already durably saved by that

@@ -133,6 +133,35 @@ describe("GeminiService.reviewDiff", () => {
     expect(call.systemInstruction).toContain("security");
   });
 
+  // 2026-10-08: 6 of PR #17's 11 warnings were "X is never used" — the model sees one diff
+  // fragment, not the uses elsewhere. The prompt now tells it so and forbids those claims.
+  it("tells the model it sees a fragment and must not report unused/undefined symbols", async () => {
+    vi.mocked(client.generateContent).mockResolvedValue(mockResponse({ issues: [], summary: "x" }));
+
+    await service.reviewDiff("patch", buildConfig(), "f.ts");
+
+    const call = vi.mocked(client.generateContent).mock.calls[0]![0];
+    expect(call.systemInstruction).toContain("ONE FRAGMENT");
+    expect(call.systemInstruction).toContain("Do NOT report unused or undefined");
+    expect(call.systemInstruction).toContain("lines starting with \"+\"");
+  });
+
+  it("drops unused/undefined/missing-import claims the model can't verify from a fragment", async () => {
+    vi.mocked(client.generateContent).mockResolvedValue(
+      mockResponse({
+        issues: [
+          { line: 1, severity: "warning", category: "logic", message: "Variable 'x' is declared but never used.", suggestion: "s" },
+          { line: 2, severity: "critical", category: "security", message: "SQL injection in query builder.", suggestion: "s" },
+        ],
+        summary: "x",
+      })
+    );
+
+    const result = await service.reviewDiff("patch", buildConfig(), "f.ts");
+
+    expect(result.issues.map((i) => i.message)).toEqual(["SQL injection in query builder."]);
+  });
+
   it("includes severity threshold in system prompt", async () => {
     vi.mocked(client.generateContent).mockResolvedValue(mockResponse({ issues: [], summary: "x" }));
 

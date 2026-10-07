@@ -1,7 +1,8 @@
 import type { FlowProducer, Job } from "bullmq";
-import { REVIEW_CHUNK_QUEUE_NAME, REVIEW_FINALIZE_QUEUE_NAME } from "./queue";
+import { FINALIZE_JOB_OPTS, REVIEW_CHUNK_QUEUE_NAME, REVIEW_FINALIZE_QUEUE_NAME } from "./queue";
 import type { IInstallationRepository } from "../modules/github/github.types";
 import type { ConfigService } from "../modules/repos/config.service";
+import { listAllPullRequestFiles } from "../modules/reviews/pr-files";
 import { resolveReviewContext } from "../modules/reviews/resolve-review-context";
 import type {
   IDiffService,
@@ -100,12 +101,9 @@ export class ReviewCoordinatorJobProcessor {
       if (existingChunks.length > 0) {
         chunkRows = existingChunks;
       } else {
-        // 4. Fetch PR diff
-        const { data: files } = await octokit.pulls.listFiles({
-          owner,
-          repo,
-          pull_number: prNumber,
-        });
+        // 4. Fetch the PR diff — every page. A bare listFiles call returns only the first 30
+        // files, which left every later file of a larger PR unreviewed (pr-files.ts).
+        const files = await listAllPullRequestFiles(octokit, owner, repo, prNumber);
 
         // 5. Filter files by ignore patterns and config
         const filesToReview = this.diffService.filterFiles(files, repoConfig);
@@ -152,7 +150,18 @@ export class ReviewCoordinatorJobProcessor {
       await this.flowProducer.add({
         name: "finalize-review",
         queueName: REVIEW_FINALIZE_QUEUE_NAME,
-        data: { reviewId: review.id, installationId, owner, repo, prNumber, prTitle, headSha, truncated },
+        opts: FINALIZE_JOB_OPTS,
+        data: {
+          reviewId: review.id,
+          installationId,
+          owner,
+          repo,
+          prNumber,
+          prTitle,
+          headSha,
+          truncated,
+          postSummaryComment: repoConfig.postSummaryComment,
+        },
         children: chunkRows.map((row) => ({
           name: "review-chunk",
           queueName: REVIEW_CHUNK_QUEUE_NAME,

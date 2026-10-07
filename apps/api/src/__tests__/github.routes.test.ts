@@ -275,6 +275,30 @@ describe("GitHub routes", () => {
       expect(res.body.data.installation.repoCount).toBe(2);
       expect(mockPrisma().repo.upsert).toHaveBeenCalledTimes(2);
     });
+    // 2026-10-08: repo sync used to read a single page, so repos 101+ never got Repo rows.
+    it("syncs every page of an installation with more than 100 repos", async () => {
+      mockPrisma().user.findUnique.mockResolvedValueOnce(buildUser());
+      mockGetInstallation.mockResolvedValueOnce({
+        data: { account: { login: "acme", type: "Organization" } },
+      });
+      mockPrisma().installation.findUnique.mockResolvedValueOnce(null);
+      mockPrisma().installation.upsert.mockResolvedValueOnce(buildInstallation());
+      const repo = (id: number) => ({ id, full_name: `acme/repo-${id}`, language: null });
+      mockListRepos
+        .mockResolvedValueOnce({ data: { total_count: 130, repositories: Array.from({ length: 100 }, (_, i) => repo(i + 1)) } })
+        .mockResolvedValueOnce({ data: { total_count: 130, repositories: Array.from({ length: 30 }, (_, i) => repo(i + 101)) } });
+
+      const res = await request(app)
+        .post("/api/github/install")
+        .set("Authorization", `Bearer ${accessTokenFor("user-1")}`)
+        .send({ installationId: 123 });
+
+      expect(res.status).toBe(201);
+      expect(mockListRepos).toHaveBeenCalledWith({ per_page: 100, page: 1 });
+      expect(mockListRepos).toHaveBeenCalledWith({ per_page: 100, page: 2 });
+      expect(mockPrisma().repo.upsert).toHaveBeenCalledTimes(130);
+      expect(res.body.data.installation.repoCount).toBe(130);
+    });
   });
 
   describe("GET /api/github/installations", () => {

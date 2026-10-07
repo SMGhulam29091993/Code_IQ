@@ -1,6 +1,13 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-10-08 (Pipeline gap fixes — branch `fix/review-pipeline-gaps`)
+- 30-file `listFiles` cap (`c460b27`), 100-repo sync cap (`69466f8`), `postSummaryComment`
+  honored (`3d4f022`), `ignorePatterns` default migration + drift guard test (`9d37a79`, pitfall
+  #010 resolved), finalize retries + FAILED on final attempt (`070874c`, pitfall #022 — the GitHub
+  500 that stranded 2026-10-07's PR #15/#16 reviews). 4 stranded `RUNNING` reviews marked
+  `FAILED`. 465/465 tests.
+
 ## 2026-10-07 (Fixes from PR #15/#16's own reviews — branch `feat/pr-review-status`)
 - Stopped the stale `api-api-1` container (2026-09-06 image) that was consuming the same BullMQ
   queues as `turbo run dev`. `b01ef0b`: LLM output limits truncate instead of rejecting a chunk.

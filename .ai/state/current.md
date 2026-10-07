@@ -1,6 +1,24 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
+## 2026-10-08 (Review-pipeline bug fixes — branch `fix/review-pipeline-gaps`, off `Dev` @ `7221d93`)
+PR #15 and #16 are merged into `Dev` (merge commits `96006eb`, `7221d93`). This branch fixes the
+open bugs from the post-merge review, one commit each — 465/465 API tests, typecheck, lint clean:
+- `c460b27` coordinator reviewed only a PR's first 30 files (no `listFiles` paging) → shared
+  `listAllPullRequestFiles` (`modules/reviews/pr-files.ts`).
+- `69466f8` repo sync read only the first 100 installation repos → paged.
+- `3d4f022` `postSummaryComment` was ignored → honored (inline-only reviews when off).
+- `9d37a79` `RepoConfig.ignorePatterns` DB default drift (pitfall #010) → migration
+  `20261008100000…` + a guard test.
+- `070874c` (found today) finalize had one attempt and never marked the review FAILED → 3
+  attempts + final-attempt FAILED (pitfall #022). This is why the 2026-10-07 runs never posted.
+- Data: the 4 reviews stuck in `RUNNING` (2026-10-04 ×2, 2026-10-07 ×2) marked `FAILED`.
+- PR #17 (this branch) got 11 CodeIQ warnings: all false positives (verified — ESLint
+  no-unused-vars is an error here and passes). 6 were "X is never used" claims from the model
+  seeing one diff fragment. Prompt now says so, but Qwen ignored it (A/B: 5 → 6 claims), so
+  `unverifiable-claims.ts` filters them after parsing — 7 of PR #17's 13 findings dropped.
+Not pushed from this session (no SSH key) — user pushes.
+
 ## 2026-10-07 (Fixing what PR #15/#16's own CodeIQ reviews surfaced — branch `feat/pr-review-status`)
 Both PRs were re-reviewed (49 + 39 inline comments). Triaged against the code: nearly all were
 7B-model false positives, but 5 real problems came out of it, fixed one at a time:

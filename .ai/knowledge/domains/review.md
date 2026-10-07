@@ -207,8 +207,9 @@ processCoordinatorJob(job):
   // through every chunk job's data (resolve-review-context.ts) — never re-fetched per chunk.
   { octokit, owner, repo, repoConfig } = await resolveReviewContext(repoId, repoFullName, installationId, ...)
 
-  // 4. Fetch PR diff
-  files = await octokit.pulls.listFiles({ owner, repo, pull_number: prNumber })
+  // 4. Fetch PR diff — EVERY page (listAllPullRequestFiles, 100/page, GitHub max 3000 files).
+  // A bare listFiles call returns only the first 30 files (fixed 2026-10-08).
+  files = await listAllPullRequestFiles(octokit, owner, repo, prNumber)
 
   // 5. Filter files by ignore patterns and config
   filesToReview = diffService.filterFiles(files, repoConfig)
@@ -385,14 +386,17 @@ already loaded — a retry never re-runs the truncation decision, only the coord
 | Gemini returns malformed JSON | Zod parse fails → chunk job throws → chunk marked FAILED |
 | LLM reports an issue on a line outside the PR's diff hunks | Not posted inline (GitHub would 422 the whole review); listed under "Other findings" in the review body instead |
 | Gemini returns > 50 issues for one chunk | Truncate to the first 50 (Zod `.transform`, not `.max` — `.max` rejected the whole chunk; fixed 2026-10-07) |
+| LLM claims a symbol is unused / undefined / missing an import | Dropped in `GeminiService.reviewDiff` (`modules/reviews/unverifiable-claims.ts`) — unverifiable from one diff fragment, and ESLint/tsc already enforce it. The prompt also tells the model it sees a fragment and not to report these, but qwen2.5-coder:7b ignored that in an A/B on PR #17's chunks (5 → 6 such claims), so the filter is what actually works. On PR #17 it removed 7 of 13 findings, all false (2026-10-08) |
 | Same finding restated across overlapping chunks of one file | Finalize collapses issues with the same file + message (case/whitespace-insensitive, line ignored) into one, keeping the most severe — `modules/reviews/dedupe-issues.ts` (2026-10-07: PR #16 had posted 19 copies). `ReviewIssue` rows are not deleted; the dashboard still lists every row |
 | LLM overruns a text limit (message > 200, suggestion > 500, summary > 500 chars) | Truncated with `…`, chunk kept — found live 2026-10-07 when a Qwen message > 200 chars failed a whole chunk with `too_big` |
+| PR touches more than 30 files | All pages of `pulls.listFiles` are read (`modules/reviews/pr-files.ts`). Before 2026-10-08 only the first 30 files were ever reviewed |
 | File is binary (no `patch`) | Filter out in `diffService.filterFiles` |
 | File is in ignore pattern | Filter out in `diffService.filterFiles` |
 | Coordinator job re-delivered (same deliveryId) | BullMQ `jobId` dedup on `review-coordinator-queue` — second enqueue is a no-op |
 | Concurrent coordinator jobs for same PR | Last one wins (headSha differs → separate Review row) |
 | Retry | Re-enters the Flow directly with only non-`DONE` `ReviewChunk` rows as children — no diff re-fetch, no re-billing already-successful chunks |
 | Chunk job stalls out (worker process restarted mid-job) | BullMQ fails it without running its catch block, so its row stays `RUNNING`. `ignoreDependencyOnFailure` still lets finalize run; finalize counts every non-`DONE` chunk as a gap; retry's `findIncomplete` includes `RUNNING` rows so they re-run (pitfall #021) |
+| Finalize throws (e.g. GitHub 5xx on `createReview`, summary LLM exhausted) | 3 attempts with exponential backoff from 10s (`FINALIZE_JOB_OPTS`, `jobs/queue.ts`); the final attempt marks the review `FAILED` (`FREE_TIER_EXHAUSTED` when the summary ran out of every LLM tier) and the PR status failed, so it can be retried. Before 2026-10-08: one attempt, review left `RUNNING` forever (pitfall #022) |
 | Retry where every chunk fails again | Review marked `FAILED` again, same as a fresh run |
 | One review-chunk job's Gemini call fails all 3 attempts | `ignoreDependencyOnFailure: true` lets the finalize job run anyway once every sibling has also settled |
 
@@ -688,11 +692,14 @@ describe('CommentService.postReview', () => {
   "did everything fail" gate at finalize time always re-queries real `ReviewChunk` rows via
   `findByReviewId`, never that counter. This is still one BullMQ job per PR/retry (chunk
   execution isn't its own queue yet — see `review-pipeline-scaling.md` Phase 3).
-- **`postSummaryComment` (a `RepoConfig` field) is not consulted by the pipeline.** Step 11 of
-  the pseudocode above always calls `commentService.postReview`, unconditionally — there's no
-  gate in this doc's pseudocode, so `ReviewJobProcessor` doesn't add one. The field exists in
-  the schema and `modules/repos`' config CRUD but currently has no effect on review behavior;
-  flag this if a future step is expected to make it do something.
+- **`postSummaryComment` (a `RepoConfig` field) is honored since 2026-10-08** (it used to be
+  stored but ignored). The coordinator / `retryReview` put it on the finalize job's data
+  (undefined → `true` for jobs queued before the field existed); `CommentService.postReview`
+  with `includeSummary: false` posts the inline comments with no PR-level summary or severity
+  table, but still lists "Other findings" in the body (unanchored findings would otherwise
+  vanish). With nothing at all to post it returns `null` and no review is created — GitHub
+  422s an empty `COMMENT` review — and the `Review` row is marked DONE with no
+  `githubReviewId`. The LLM summary is still generated and stored for the dashboard.
 - **`micromatch`'s `{ basename: true }` option does not behave as "apply basename matching only
   to slash-less patterns"** — passing it globally broke matching for slash-containing patterns
   like `"dist/**"` (verified empirically: `isMatch('dist/out.js', 'dist/**', {basename:true})` →

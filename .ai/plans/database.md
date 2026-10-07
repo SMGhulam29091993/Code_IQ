@@ -76,7 +76,7 @@ model RepoConfig {
   repo                 Repo     @relation(fields: [repoId], references: [id], onDelete: Cascade)
   severityThreshold    String   @default("WARNING")  // CRITICAL | WARNING | INFO
   enabledCategories    String[] @default(["bug","security","performance","logic"])
-  ignorePatterns       String[] @default(["*.test.ts","*.spec.ts","dist/**"])
+  ignorePatterns       String[] @default(["*.test.ts","*.spec.ts","dist/**","node_modules/**"])  // fixed 2026-10-08, pitfall #010
   reviewOnDraft        Boolean  @default(false)
   postSummaryComment   Boolean  @default(true)
   updatedAt            DateTime @updatedAt
@@ -158,6 +158,7 @@ CREATE INDEX idx_repo_installation ON "Repo"("installationId");
   see 004 below)
 - ~~003_processed_stripe_events~~ — covered by 001_init, see above
 - [x] `20261004140000_add_review_pr_status_ids` — `Review.githubStatusCommentId`/`githubCheckRunId`. Applied with `prisma migrate deploy` after `migrate resolve --applied 20260913120000_add_review_failure_reason` (that one was hand-applied — pitfall #018 — so Prisma had no record of it); `migrate diff` against the dev DB confirmed zero drift afterwards.
+- [x] `20261008100000_fix_repo_config_ignore_patterns_default` — `RepoConfig.ignorePatterns` column default now includes `node_modules/**`, matching `DEFAULT_REPO_CONFIG` (pitfall #010). Default-only change; existing rows untouched.
 - [x] 004_drop_refresh_token_table (`20260823105451_drop_refresh_token_table`) — refresh
   tokens moved to Redis, applied 2026-08-23. See `decisions/006-redis-for-refresh-tokens.md`.
 

@@ -1,5 +1,6 @@
 import type { Job } from "bullmq";
 import { ALL_TIERS_EXHAUSTED_CHUNK_ERROR } from "./review-chunk.job";
+import { AllTiersExhaustedError } from "../lib/llm-client";
 import { getInstallationOctokit } from "../lib/octokit";
 import type { IInstallationRepository } from "../modules/github/github.types";
 import { dedupeIssues } from "../modules/reviews/dedupe-issues";
@@ -34,8 +35,26 @@ export class ReviewFinalizeJobProcessor {
   ) {}
 
   async process(job: Job<ReviewFinalizeJobData>): Promise<void> {
+    try {
+      await this.finalize(job);
+    } catch (err) {
+      // Only the last attempt settles the review (FINALIZE_JOB_OPTS gives it 3). Before
+      // 2026-10-08 a failed finalize left the review RUNNING forever — never FAILED, so it
+      // couldn't be retried from the dashboard either.
+      if (isFinalAttempt(job)) {
+        const failureReason = err instanceof AllTiersExhaustedError ? "FREE_TIER_EXHAUSTED" : null;
+        await this.reviewRepo.update(job.data.reviewId, { status: "FAILED", failureReason });
+        await this.prStatus.fail(job.data.reviewId, failureReason);
+      }
+      throw err;
+    }
+  }
+
+  private async finalize(job: Job<ReviewFinalizeJobData>): Promise<void> {
     const { reviewId, installationId, owner, repo, prNumber, prTitle, headSha, truncated } =
       job.data;
+    // Undefined for finalize jobs queued before the field existed — the setting defaults to true.
+    const postSummaryComment = job.data.postSummaryComment ?? true;
 
     const allChunks = await this.reviewChunkRepo.findByReviewId(reviewId);
     const doneChunks = allChunks.filter((chunk) => chunk.status === "DONE");
@@ -79,28 +98,23 @@ export class ReviewFinalizeJobProcessor {
     }
     const octokit = getInstallationOctokit(installation.githubInstallationId);
 
-    let githubReviewId: number;
-    try {
-      githubReviewId = await this.commentService.postReview(octokit, {
-        owner,
-        repo,
-        prNumber,
-        headSha,
-        issues: allIssues,
-        summary,
-      });
-    } catch (err) {
-      // Keep the PR's status comment honest instead of leaving it at "in progress" — if BullMQ
-      // retries this job and the post succeeds, complete() below overwrites it.
-      await this.prStatus.fail(reviewId, null);
-      throw err;
-    }
+    // A failure here propagates to process(), which marks the review FAILED on the last attempt.
+    const githubReviewId = await this.commentService.postReview(octokit, {
+      owner,
+      repo,
+      prNumber,
+      headSha,
+      issues: allIssues,
+      summary,
+      includeSummary: postSummaryComment,
+    });
 
     await this.reviewRepo.update(reviewId, {
       status: "DONE",
       summary,
       filesReviewed: new Set(doneChunks.map((chunk) => chunk.filename)).size,
-      githubReviewId,
+      // null = nothing was posted (summary disabled, no findings) — leave the column unset.
+      ...(githubReviewId !== null ? { githubReviewId } : {}),
     });
 
     await this.prStatus.complete(reviewId, {
@@ -111,4 +125,9 @@ export class ReviewFinalizeJobProcessor {
       gaps: failedChunks.length,
     });
   }
+}
+
+// BullMQ v5: attemptsMade counts attempts that already failed, so during attempt N it is N - 1.
+function isFinalAttempt(job: Job): boolean {
+  return (job.attemptsMade ?? 0) + 1 >= (job.opts?.attempts ?? 1);
 }

@@ -1,5 +1,6 @@
 import type { GeminiIssue, GeminiReviewResult, IGeminiService, ILLMClient } from "./review.types";
 import { GeminiReviewResultSchema, GeminiSummaryResultSchema } from "./review.validator";
+import { isUnverifiableSymbolClaim } from "./unverifiable-claims";
 import type { SanitizedRepoConfig } from "../repos/repo.types";
 
 // Exact pseudocode from .ai/knowledge/domains/review.md "gemini.service.ts". Retry-with-backoff
@@ -23,7 +24,10 @@ export class GeminiService implements IGeminiService {
       contents: [{ role: "user", parts: [{ text: patch }] }],
     });
     const raw: unknown = JSON.parse(result.text);
-    return GeminiReviewResultSchema.parse(raw);
+    const parsed = GeminiReviewResultSchema.parse(raw);
+    // Drop "X is never used / not defined / missing import" claims — unverifiable from one diff
+    // fragment and already enforced by the linter/compiler (unverifiable-claims.ts).
+    return { ...parsed, issues: parsed.issues.filter((issue) => !isUnverifiableSymbolClaim(issue.message)) };
   }
 
   async summarizePR(
@@ -58,9 +62,17 @@ Return ONLY valid JSON matching this exact schema:
   }],
   "summary": string (max 500 chars)
 }
+Context: you see ONE FRAGMENT of this file's diff (a chunk of at most 300 lines), not the whole
+file or repository. Code before, after and outside this fragment exists but is not shown.
 Rules:
 - Only report ${config.enabledCategories.join(", ")} categories.
 - Minimum severity to report: ${config.severityThreshold}.
+- Only report concrete problems in the changed lines (lines starting with "+").
+- Do NOT report unused or undefined variables, imports, functions, parameters or properties,
+  or missing imports/definitions: their uses and definitions are usually outside this fragment,
+  and the compiler and linter already check them.
+- If you are not confident an issue is real, do not report it. An empty "issues" array is a
+  valid answer.
 - Maximum 50 issues. Prioritize by severity.
 - No markdown. No explanation outside the JSON.`;
 }

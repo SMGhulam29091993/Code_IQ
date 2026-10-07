@@ -260,8 +260,9 @@ describe('ConfigService.getEffectiveConfig', () => {
   takes an installation `Octokit` + `owner`/`repo`, which only exist once a review is actually
   running — its first and only real caller is `jobs/review.job.ts`'s pipeline, wired in Step 5
   (`.ai/knowledge/domains/review.md`).
-- **Default config: schema.prisma's column `@default` on `ignorePatterns` doesn't match this
-  doc's default.** The Prisma column default is `["*.test.ts", "*.spec.ts", "dist/**"]` (missing
+- **Default config: schema.prisma's column `@default` on `ignorePatterns` didn't match this
+  doc's default** (fixed 2026-10-08 — migration `20261008100000`, guarded by
+  `repo-config-defaults.test.ts`). The Prisma column default is `["*.test.ts", "*.spec.ts", "dist/**"]` (missing
   `"node_modules/**"`). `repo-config.repository.ts`'s `createDefault`/`upsertPartial` never rely
   on that column default — every field is passed explicitly from `DEFAULT_REPO_CONFIG` in
   `repo.types.ts`, which does match this doc — so the drift is currently harmless but worth

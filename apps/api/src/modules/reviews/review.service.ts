@@ -20,7 +20,7 @@ import type {
   SanitizedReviewIssue,
   SanitizedReviewSummary,
 } from "./review.types";
-import { REVIEW_CHUNK_QUEUE_NAME, REVIEW_FINALIZE_QUEUE_NAME, reviewFlowProducer } from "../../jobs/queue";
+import { FINALIZE_JOB_OPTS, REVIEW_CHUNK_QUEUE_NAME, REVIEW_FINALIZE_QUEUE_NAME, reviewFlowProducer } from "../../jobs/queue";
 import { AppError, BadRequestError, ForbiddenError, NotFoundError } from "../../lib/errors";
 import type { IInstallationRepository } from "../github/github.types";
 import type { ConfigService } from "../repos/config.service";
@@ -90,6 +90,7 @@ export class ReviewService implements IReviewService {
       await reviewFlowProducer.add({
         name: "finalize-review",
         queueName: REVIEW_FINALIZE_QUEUE_NAME,
+        opts: FINALIZE_JOB_OPTS,
         data: {
           reviewId,
           installationId: repo.installationId,
@@ -99,6 +100,7 @@ export class ReviewService implements IReviewService {
           prTitle: review.prTitle,
           headSha: review.headSha,
           truncated: review.truncated,
+          postSummaryComment: repoConfig.postSummaryComment,
         },
         children: incomplete.map((chunk) => ({
           name: "review-chunk",

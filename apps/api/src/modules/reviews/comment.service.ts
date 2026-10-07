@@ -1,4 +1,5 @@
 import type { Octokit } from "@octokit/rest";
+import { listAllPullRequestFiles } from "./pr-files";
 import type { GeminiIssue, ICommentService, PostReviewInput } from "./review.types";
 
 const SEVERITY_ICON: Record<string, string> = { critical: "🔴", warning: "🟡", info: "🔵" };
@@ -6,14 +7,13 @@ const SEVERITY_ICON: Record<string, string> = { critical: "🔴", warning: "🟡
 // Unanchored findings listed in the summary body, capped so a noisy review can't push the body
 // past GitHub's 65,536-character review-body limit.
 const MAX_UNANCHORED_IN_SUMMARY = 50;
-const LIST_FILES_PAGE_SIZE = 100;
 
 // .ai/knowledge/domains/review.md "comment.service.ts".
 export class CommentService implements ICommentService {
   async postReview(
     octokit: Octokit,
-    { owner, repo, prNumber, headSha, issues, summary }: PostReviewInput
-  ): Promise<number> {
+    { owner, repo, prNumber, headSha, issues, summary, includeSummary = true }: PostReviewInput
+  ): Promise<number | null> {
     // GitHub rejects the *entire* createReview call with 422 "Line could not be resolved" if
     // even one inline comment targets a line outside the PR's diff hunks — and the line numbers
     // come from an LLM reading a raw patch, which gets this wrong sometimes (found live
@@ -34,6 +34,19 @@ export class CommentService implements ICommentService {
       body: formatComment(issue),
     }));
 
+    // RepoConfig.postSummaryComment = false: inline comments only, no PR-level summary/table.
+    // Unanchored findings stay in the body even then — they have nowhere else to go, and
+    // dropping them would silently hide real findings.
+    const body = includeSummary
+      ? formatSummary(summary, issues) + formatUnanchored(unanchored)
+      : formatUnanchored(unanchored).trimStart();
+
+    // A COMMENT review needs a body or at least one comment — GitHub 422s an empty one. Only
+    // reachable with the summary disabled and zero findings; there's simply nothing to post.
+    if (comments.length === 0 && body === "") {
+      return null;
+    }
+
     const response = await octokit.pulls.createReview({
       owner,
       repo,
@@ -41,7 +54,7 @@ export class CommentService implements ICommentService {
       commit_id: headSha,
       // Non-blocking — never REQUEST_CHANGES. See .ai/knowledge/domains/review.md.
       event: "COMMENT",
-      body: formatSummary(summary, issues) + formatUnanchored(unanchored),
+      body,
       comments,
     });
     return response.data.id;
@@ -57,22 +70,9 @@ async function fetchCommentableLines(
   repo: string,
   prNumber: number
 ): Promise<Map<string, Set<number>>> {
-  // Manual page loop, not octokit.paginate — the pinned CJS Octokit v19 (memory/pitfalls.md
-  // #007) pulls in two @octokit/types versions whose RequestInterface types don't unify, so
-  // paginate(pulls.listFiles) doesn't typecheck. GitHub caps this endpoint at 3000 files.
   const result = new Map<string, Set<number>>();
-  for (let page = 1; ; page++) {
-    const { data: files } = await octokit.pulls.listFiles({
-      owner,
-      repo,
-      pull_number: prNumber,
-      per_page: LIST_FILES_PAGE_SIZE,
-      page,
-    });
-    for (const file of files) {
-      if (file.patch) result.set(file.filename, parseCommentableLines(file.patch));
-    }
-    if (files.length < LIST_FILES_PAGE_SIZE) break;
+  for (const file of await listAllPullRequestFiles(octokit, owner, repo, prNumber)) {
+    if (file.patch) result.set(file.filename, parseCommentableLines(file.patch));
   }
   return result;
 }

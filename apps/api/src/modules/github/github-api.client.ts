@@ -11,6 +11,10 @@ import { env } from "../../lib/env";
 import { AppError, NotFoundError } from "../../lib/errors";
 import { appOctokit, getInstallationOctokit } from "../../lib/octokit";
 
+const REPO_PAGE_SIZE = 100;
+// 100 pages × 100 = 10,000 repos — far beyond any real installation; only a runaway guard.
+const MAX_REPO_PAGES = 100;
+
 const GITHUB_OAUTH_TOKEN_URL = "https://github.com/login/oauth/access_token";
 
 export class GithubApiClient implements IGithubApiClient {
@@ -71,19 +75,31 @@ export class GithubApiClient implements IGithubApiClient {
     }
   }
 
-  // Single page, 100 repos — see github-app.md "Repo sync" for why pagination isn't handled
-  // yet (no installation in this codebase's test data has ever needed a second page).
+  // Every repo the installation can access — all pages, 100 per page. Was a single page until
+  // 2026-10-08, so an installation with more than 100 repos never got Repo rows for the rest
+  // (their pull_request webhooks then resolved to "Repo not active"). Manual page loop for the
+  // same reason as modules/reviews/pr-files.ts (octokit.paginate doesn't typecheck under the
+  // pinned Octokit v19). Stops on a short page, once total_count is reached, or at
+  // MAX_REPO_PAGES as a guard against a response that never ends.
   async listInstallationRepos(githubInstallationId: number): Promise<GithubRepoListItem[]> {
     try {
       const octokit = getInstallationOctokit(githubInstallationId);
-      const { data } = await octokit.rest.apps.listReposAccessibleToInstallation({
-        per_page: 100,
-      });
-      return data.repositories.map((repo) => ({
-        githubRepoId: repo.id,
-        fullName: repo.full_name,
-        language: repo.language ?? null,
-      }));
+      const repos: GithubRepoListItem[] = [];
+      for (let page = 1; page <= MAX_REPO_PAGES; page++) {
+        const { data } = await octokit.rest.apps.listReposAccessibleToInstallation({
+          per_page: REPO_PAGE_SIZE,
+          page,
+        });
+        for (const repo of data.repositories) {
+          repos.push({
+            githubRepoId: repo.id,
+            fullName: repo.full_name,
+            language: repo.language ?? null,
+          });
+        }
+        if (data.repositories.length < REPO_PAGE_SIZE || repos.length >= data.total_count) break;
+      }
+      return repos;
     } catch {
       throw new AppError("GitHub API unavailable", 502);
     }
