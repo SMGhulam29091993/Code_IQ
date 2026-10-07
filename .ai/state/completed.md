@@ -1,6 +1,16 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-10-07 (Fixes from PR #15/#16's own reviews — branch `feat/pr-review-status`)
+- Stopped the stale `api-api-1` container (2026-09-06 image) that was consuming the same BullMQ
+  queues as `turbo run dev`. `b01ef0b`: LLM output limits truncate instead of rejecting a chunk.
+  `ee0681a`: finalize de-duplicates issues by file + message. `ac44d08`: state refreshed.
+- New repo-root `.codeiq.yml`: stops reviewing docs (`*.md`) per user decision, and repeats the
+  dashboard defaults (it *replaces* `ignorePatterns`, config.service.ts) with `**/dist/**` /
+  `**/node_modules/**` — the dashboard's `dist/**` only matches a root-level `dist/`, missing
+  `apps/*/dist`. Verified against the real `DiffService.filterFiles` + `YamlConfigSchema`. Takes
+  effect only once on the default branch (`Dev`) — config.service reads the default branch.
+
 ## 2026-10-07 (Ollama output cap — branch `feat/ollama-local-llm`, merged into `feat/pr-review-status`)
 - Investigated the 2026-10-04 `timed out after 300000ms`: re-ran PR #15's real summary (55
   issues → 2.7s, 40 tokens) and the largest real chunk (152 lines → 62.7s, 662 tokens) against
