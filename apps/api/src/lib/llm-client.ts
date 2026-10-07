@@ -176,7 +176,7 @@ function sleep(ms: number): Promise<void> {
 // default model list (verify against https://openrouter.ai/models — free-tier offerings rotate).
 export function buildLLMClient(
   config: Pick<typeof env, "OPEN_ROUTER_MODELS" | "OLLAMA_BASE_URL" | "OLLAMA_MODEL"> &
-    Partial<Pick<typeof env, "OLLAMA_TIMEOUT_MS">> = env
+    Partial<Pick<typeof env, "OLLAMA_TIMEOUT_MS" | "OLLAMA_NUM_PREDICT">> = env
 ): ILLMClient {
   const openRouterModels = config.OPEN_ROUTER_MODELS.split(",")
     .map((m) => m.trim())
@@ -186,7 +186,12 @@ export function buildLLMClient(
     ? [
         {
           client: new RetryingLLMClient(
-            new OllamaClient(config.OLLAMA_BASE_URL, config.OLLAMA_MODEL, config.OLLAMA_TIMEOUT_MS),
+            new OllamaClient(
+              config.OLLAMA_BASE_URL,
+              config.OLLAMA_MODEL,
+              config.OLLAMA_TIMEOUT_MS,
+              config.OLLAMA_NUM_PREDICT
+            ),
             `ollama:${config.OLLAMA_MODEL}`
           ),
           label: `ollama:${config.OLLAMA_MODEL}`,

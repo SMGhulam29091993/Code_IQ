@@ -721,6 +721,8 @@ describe('CommentService.postReview', () => {
   `OllamaClient` ahead of Gemini in the same fallback chain. Unreachable/timed-out/4xx Ollama is
   non-retryable, so the chain falls straight through to Gemini. Requests are serialized per
   process so the timeout (`OLLAMA_TIMEOUT_MS`, default 300s) measures inference, not queueing.
+  Output is capped by `OLLAMA_NUM_PREDICT` (default 2048 tokens); a capped-out answer throws and
+  falls through to Gemini rather than returning half-written JSON (decisions/009 2026-10-07).
   `GeminiService` and the job processors are unchanged.
 - **Fast-fail on full LLM exhaustion (`decisions/008`'s 2026-09-13 addendum):**
   `FallbackLLMClient` throws a typed `lib/llm-client.ts` `AllTiersExhaustedError` once every tier

@@ -62,6 +62,10 @@ const envSchema = z.object({
   // Per-request inference timeout (ms) — counted from when the request is actually sent, not
   // while it waits behind other chunks (lib/ollama.ts serializes requests).
   OLLAMA_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
+  // Max tokens Ollama may generate per request (`num_predict`) — see lib/ollama.ts
+  // DEFAULT_OLLAMA_NUM_PREDICT for how the default was measured. A capped-out answer falls
+  // through to the next tier.
+  OLLAMA_NUM_PREDICT: z.coerce.number().int().positive().default(2048),
 
   // Stripe — billing module (.ai/plans/backend.md Step 6). Price IDs map 1:1 to
   // PlanTier ('FREE' has none — it's never checked out). See .ai/knowledge/domains/billing.md.

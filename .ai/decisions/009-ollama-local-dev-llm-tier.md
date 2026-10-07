@@ -73,3 +73,25 @@ connection failure now produce distinct messages (`timed out after Nms` vs `unre
 in Ollama — total wall-clock time is the same (Ollama was the bottleneck either way), but no
 chunk fails just for having waited. Running two API processes against one Redis still doubles
 the queue consumers; run only one locally.
+
+## Addendum (2026-10-07): cap generated tokens (`num_predict`)
+
+A later live run logged `Ollama ... timed out after 300000ms` and PR #15's finalize sat for
+minutes (its summary request queued behind PR #16's chunk calls in the serialized Ollama queue,
+then fell back down the chain). Re-measured in isolation with the real data: the PR summary over
+all 55 issues took 2.7s (40 output tokens); the largest real chunk (152 lines) took 62.7s (662
+output tokens, 9 issues). Generation runs at only ~16 tokens/s on this machine. So the exact
+request that hit 300s couldn't be reproduced — most likely an unusually long output on one chunk,
+or the Mac slowing under memory pressure mid-run — but nothing bounded a single answer's length.
+
+**Decision:** every Ollama request sets `options.num_predict` (default 2048 — >3x the largest
+measured output, ~2 min at 16 tok/s; `OLLAMA_NUM_PREDICT` to override). A response Ollama stops
+for length (`done_reason: "length"`) is half-written JSON, so `OllamaClient` throws a
+non-retryable `LLMClientError` instead of returning it — otherwise `GeminiService`'s
+`JSON.parse` would fail *outside* the LLM client, where `FallbackLLMClient` can't see it, and
+the chunk would fail instead of falling through to Gemini. Live-verified: cap 10 → the
+cap error; cap 2048 → normal JSON.
+
+**Not done (noted):** the summary request shares the same FIFO queue as chunk calls, so a
+review's finalize can wait behind another review's chunks. A priority lane for summary calls is
+the follow-up if that wait matters in practice.

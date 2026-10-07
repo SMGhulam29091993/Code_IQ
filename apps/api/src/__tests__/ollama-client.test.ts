@@ -39,6 +39,7 @@ describe("OllamaClient", () => {
     expect(body.stream).toBe(false);
     expect(body.format).toBe("json");
     expect(body.options.num_ctx).toBe(16_384);
+    expect(body.options.num_predict).toBe(2048);
     expect(body.messages).toEqual([
       { role: "system", content: "system prompt" },
       { role: "user", content: "diff text" },
@@ -141,5 +142,27 @@ describe("OllamaClient", () => {
 
     expect(await first).toBeInstanceOf(LLMClientError);
     expect((await second).text).toBe("ok");
+  });
+
+  it("honors a custom output cap", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ message: { content: "{}" }, done_reason: "stop" }));
+    const client = new OllamaClient("http://localhost:11434", "m", 5_000, 512);
+
+    await client.generateContent({ contents: [] });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body).options.num_predict).toBe(512);
+  });
+
+  // A capped-out answer is half-written JSON; it must fail inside the client so
+  // FallbackLLMClient falls through to Gemini, rather than reaching GeminiService's JSON.parse.
+  it("throws a non-retryable LLMClientError when the output hit the num_predict cap", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ message: { content: '{"issues":[{"line":1,' }, done_reason: "length" }));
+    const client = new OllamaClient("http://localhost:11434", "m", 5_000, 2048);
+
+    const err = await client.generateContent({ contents: [] }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(LLMClientError);
+    expect(err.message).toBe("Ollama (m) hit the 2048-token output cap before finishing");
+    expect(err.retryable).toBe(false);
   });
 });
