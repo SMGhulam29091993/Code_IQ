@@ -1,6 +1,16 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-10-07 (Ollama output cap — branch `feat/ollama-local-llm`, merged into `feat/pr-review-status`)
+- Investigated the 2026-10-04 `timed out after 300000ms`: re-ran PR #15's real summary (55
+  issues → 2.7s, 40 tokens) and the largest real chunk (152 lines → 62.7s, 662 tokens) against
+  `qwen2.5-coder:7b`; ~16 tok/s generation. Not reproducible in isolation; root cause of that one
+  request unconfirmed (no server logs) — the fix bounds it either way.
+- `OllamaClient` now sends `num_predict` (default 2048, `OLLAMA_NUM_PREDICT`) and treats
+  `done_reason: "length"` as a non-retryable `LLMClientError` so a cut-off answer falls through to
+  Gemini instead of failing JSON parsing outside the fallback chain. Live-verified (cap 10 → error,
+  2048 → ok). 2 new tests. decisions/009 addendum.
+
 ## 2026-10-04 (Fix: Flow parent blocked forever by any failed chunk — branch `feat/ollama-local-llm`)
 - Root cause of PR #15 (and earlier PR #10/#8) stuck `RUNNING`: chunk children used
   `failParentOnFailure: false` (BullMQ's default — a failed child blocks the parent forever)

@@ -11,6 +11,15 @@ const NUM_CTX = 16_384;
 // this, fall through to the next tier. Overridable via OLLAMA_TIMEOUT_MS (env.ts).
 export const DEFAULT_OLLAMA_TIMEOUT_MS = 300_000;
 
+// Hard cap on generated tokens per request (Ollama `num_predict`; unlimited by default).
+// Measured 2026-10-07 on qwen2.5-coder:7b locally: ~16 tokens/s generation, and the largest real
+// outputs were 662 tokens (a 152-line chunk, 9 issues) and 40 tokens (PR summary). 2048 leaves
+// >3x headroom over that while bounding any single answer to ~2 minutes — so an unusually long
+// or runaway generation ends well inside DEFAULT_OLLAMA_TIMEOUT_MS instead of holding the
+// serialized Ollama queue (and every chunk behind it) for the full timeout. Overridable via
+// OLLAMA_NUM_PREDICT (env.ts).
+export const DEFAULT_OLLAMA_NUM_PREDICT = 2048;
+
 // Adapter — local-development LLM tier (decisions/009). Translates ILLMClient's
 // {systemInstruction, contents} request into Ollama's native /api/chat body and its response
 // back into ILLMClient's plain {text} shape, same contract as lib/gemini.ts and
@@ -35,7 +44,8 @@ export class OllamaClient implements ILLMClient {
   constructor(
     private readonly baseUrl: string,
     private readonly model: string,
-    private readonly timeoutMs: number = DEFAULT_OLLAMA_TIMEOUT_MS
+    private readonly timeoutMs: number = DEFAULT_OLLAMA_TIMEOUT_MS,
+    private readonly numPredict: number = DEFAULT_OLLAMA_NUM_PREDICT
   ) {}
 
   generateContent(
@@ -70,7 +80,7 @@ export class OllamaClient implements ILLMClient {
           messages,
           stream: false,
           format: "json",
-          options: { num_ctx: NUM_CTX, temperature: 0.2 },
+          options: { num_ctx: NUM_CTX, temperature: 0.2, num_predict: this.numPredict },
         }),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
@@ -98,10 +108,21 @@ export class OllamaClient implements ILLMClient {
       );
     }
 
-    const json = (await res.json()) as { message?: { content?: string } };
+    const json = (await res.json()) as { message?: { content?: string }; done_reason?: string };
     const text = json.message?.content;
     if (typeof text !== "string") {
       throw new LLMClientError(`Ollama (${this.model}) returned no message content`, undefined, null, false);
+    }
+    // Cut off by num_predict: the text is half-written JSON. Returning it would make
+    // GeminiService's JSON.parse throw *outside* the LLM client — where FallbackLLMClient can't
+    // see it — so the chunk would fail instead of falling through to Gemini. Fail here instead.
+    if (json.done_reason === "length") {
+      throw new LLMClientError(
+        `Ollama (${this.model}) hit the ${this.numPredict}-token output cap before finishing`,
+        undefined,
+        null,
+        false
+      );
     }
     return { text };
   }
