@@ -269,6 +269,13 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
     expect(flowProducer.add).not.toHaveBeenCalled();
   });
 
+  it("carries the repo's postSummaryComment setting on the finalize job", async () => {
+    await processor.process(buildJob());
+
+    const flow = vi.mocked(flowProducer.add).mock.calls[0]![0];
+    expect(flow.data).toEqual(expect.objectContaining({ postSummaryComment: DEFAULT_CONFIG.postSummaryComment }));
+  });
+
   // 2026-10-08: listFiles was called without paging, so only the first 30 files were reviewed.
   it("reviews every file of a PR larger than one page of listFiles", async () => {
     const page1 = Array.from({ length: 100 }, (_, i) => buildDiffFile({ filename: `p1-${i}.ts` }));
@@ -317,6 +324,7 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
         prTitle: "Add feature",
         headSha: "sha123",
         truncated: false,
+        postSummaryComment: true,
       },
       children: [
         {

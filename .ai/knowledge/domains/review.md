@@ -690,11 +690,14 @@ describe('CommentService.postReview', () => {
   "did everything fail" gate at finalize time always re-queries real `ReviewChunk` rows via
   `findByReviewId`, never that counter. This is still one BullMQ job per PR/retry (chunk
   execution isn't its own queue yet — see `review-pipeline-scaling.md` Phase 3).
-- **`postSummaryComment` (a `RepoConfig` field) is not consulted by the pipeline.** Step 11 of
-  the pseudocode above always calls `commentService.postReview`, unconditionally — there's no
-  gate in this doc's pseudocode, so `ReviewJobProcessor` doesn't add one. The field exists in
-  the schema and `modules/repos`' config CRUD but currently has no effect on review behavior;
-  flag this if a future step is expected to make it do something.
+- **`postSummaryComment` (a `RepoConfig` field) is honored since 2026-10-08** (it used to be
+  stored but ignored). The coordinator / `retryReview` put it on the finalize job's data
+  (undefined → `true` for jobs queued before the field existed); `CommentService.postReview`
+  with `includeSummary: false` posts the inline comments with no PR-level summary or severity
+  table, but still lists "Other findings" in the body (unanchored findings would otherwise
+  vanish). With nothing at all to post it returns `null` and no review is created — GitHub
+  422s an empty `COMMENT` review — and the `Review` row is marked DONE with no
+  `githubReviewId`. The LLM summary is still generated and stored for the dashboard.
 - **`micromatch`'s `{ basename: true }` option does not behave as "apply basename matching only
   to slash-less patterns"** — passing it globally broke matching for slash-containing patterns
   like `"dist/**"` (verified empirically: `isMatch('dist/out.js', 'dist/**', {basename:true})` →

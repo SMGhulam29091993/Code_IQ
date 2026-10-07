@@ -150,7 +150,17 @@ export class ReviewCoordinatorJobProcessor {
       await this.flowProducer.add({
         name: "finalize-review",
         queueName: REVIEW_FINALIZE_QUEUE_NAME,
-        data: { reviewId: review.id, installationId, owner, repo, prNumber, prTitle, headSha, truncated },
+        data: {
+          reviewId: review.id,
+          installationId,
+          owner,
+          repo,
+          prNumber,
+          prTitle,
+          headSha,
+          truncated,
+          postSummaryComment: repoConfig.postSummaryComment,
+        },
         children: chunkRows.map((row) => ({
           name: "review-chunk",
           queueName: REVIEW_CHUNK_QUEUE_NAME,

@@ -321,6 +321,19 @@ describe("ReviewService", () => {
   });
 
   describe("retryReview", () => {
+    it("carries the repo's postSummaryComment setting on the retry's finalize job", async () => {
+      vi.mocked(reviewRepo.findById).mockResolvedValue(buildOwnedReview({ status: "FAILED" }));
+      vi.mocked(repoRepo.findByIdForUser).mockResolvedValue(buildOwnedRepo());
+      vi.mocked(reviewRepo.update).mockResolvedValue(buildReview({ status: "RUNNING" }));
+      vi.mocked(reviewChunkRepo.findIncomplete).mockResolvedValue([buildChunk({ id: "chunk-1" })]);
+
+      await service.retryReview("user-1", "review-1");
+
+      expect(reviewFlowProducer.add).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ postSummaryComment: expect.any(Boolean) }) })
+      );
+    });
+
     it("resets the PR status to in progress when a retry starts", async () => {
       vi.mocked(reviewRepo.findById).mockResolvedValue(buildOwnedReview({ status: "FAILED" }));
       vi.mocked(repoRepo.findByIdForUser).mockResolvedValue(buildOwnedRepo());

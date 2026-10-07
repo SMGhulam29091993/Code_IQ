@@ -12,8 +12,8 @@ const MAX_UNANCHORED_IN_SUMMARY = 50;
 export class CommentService implements ICommentService {
   async postReview(
     octokit: Octokit,
-    { owner, repo, prNumber, headSha, issues, summary }: PostReviewInput
-  ): Promise<number> {
+    { owner, repo, prNumber, headSha, issues, summary, includeSummary = true }: PostReviewInput
+  ): Promise<number | null> {
     // GitHub rejects the *entire* createReview call with 422 "Line could not be resolved" if
     // even one inline comment targets a line outside the PR's diff hunks — and the line numbers
     // come from an LLM reading a raw patch, which gets this wrong sometimes (found live
@@ -34,6 +34,19 @@ export class CommentService implements ICommentService {
       body: formatComment(issue),
     }));
 
+    // RepoConfig.postSummaryComment = false: inline comments only, no PR-level summary/table.
+    // Unanchored findings stay in the body even then — they have nowhere else to go, and
+    // dropping them would silently hide real findings.
+    const body = includeSummary
+      ? formatSummary(summary, issues) + formatUnanchored(unanchored)
+      : formatUnanchored(unanchored).trimStart();
+
+    // A COMMENT review needs a body or at least one comment — GitHub 422s an empty one. Only
+    // reachable with the summary disabled and zero findings; there's simply nothing to post.
+    if (comments.length === 0 && body === "") {
+      return null;
+    }
+
     const response = await octokit.pulls.createReview({
       owner,
       repo,
@@ -41,7 +54,7 @@ export class CommentService implements ICommentService {
       commit_id: headSha,
       // Non-blocking — never REQUEST_CHANGES. See .ai/knowledge/domains/review.md.
       event: "COMMENT",
-      body: formatSummary(summary, issues) + formatUnanchored(unanchored),
+      body,
       comments,
     });
     return response.data.id;

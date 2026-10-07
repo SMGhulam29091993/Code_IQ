@@ -99,6 +99,7 @@ export class ReviewService implements IReviewService {
           prTitle: review.prTitle,
           headSha: review.headSha,
           truncated: review.truncated,
+          postSummaryComment: repoConfig.postSummaryComment,
         },
         children: incomplete.map((chunk) => ({
           name: "review-chunk",

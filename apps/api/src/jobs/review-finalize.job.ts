@@ -36,6 +36,8 @@ export class ReviewFinalizeJobProcessor {
   async process(job: Job<ReviewFinalizeJobData>): Promise<void> {
     const { reviewId, installationId, owner, repo, prNumber, prTitle, headSha, truncated } =
       job.data;
+    // Undefined for finalize jobs queued before the field existed — the setting defaults to true.
+    const postSummaryComment = job.data.postSummaryComment ?? true;
 
     const allChunks = await this.reviewChunkRepo.findByReviewId(reviewId);
     const doneChunks = allChunks.filter((chunk) => chunk.status === "DONE");
@@ -79,7 +81,7 @@ export class ReviewFinalizeJobProcessor {
     }
     const octokit = getInstallationOctokit(installation.githubInstallationId);
 
-    let githubReviewId: number;
+    let githubReviewId: number | null;
     try {
       githubReviewId = await this.commentService.postReview(octokit, {
         owner,
@@ -88,6 +90,7 @@ export class ReviewFinalizeJobProcessor {
         headSha,
         issues: allIssues,
         summary,
+        includeSummary: postSummaryComment,
       });
     } catch (err) {
       // Keep the PR's status comment honest instead of leaving it at "in progress" — if BullMQ
@@ -100,7 +103,8 @@ export class ReviewFinalizeJobProcessor {
       status: "DONE",
       summary,
       filesReviewed: new Set(doneChunks.map((chunk) => chunk.filename)).size,
-      githubReviewId,
+      // null = nothing was posted (summary disabled, no findings) — leave the column unset.
+      ...(githubReviewId !== null ? { githubReviewId } : {}),
     });
 
     await this.prStatus.complete(reviewId, {

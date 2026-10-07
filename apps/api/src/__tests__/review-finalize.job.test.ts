@@ -129,6 +129,7 @@ describe("ReviewFinalizeJobProcessor.process", () => {
       headSha: "sha123",
       issues: [{ line: 1, severity: "info", category: "style", message: "m", suggestion: "s", file: "a.ts" }],
       summary: "PR summary",
+      includeSummary: true,
     });
   });
 
@@ -294,5 +295,36 @@ describe("ReviewFinalizeJobProcessor.process", () => {
     expect(geminiService.summarizePR).toHaveBeenCalledWith(expect.anything(), [dup]);
     expect(commentService.postReview).toHaveBeenCalledWith(fakeOctokit, expect.objectContaining({ issues: [dup] }));
     expect(prStatus.complete).toHaveBeenCalledWith("review-1", expect.objectContaining({ warning: 1 }));
+  });
+
+  describe("postSummaryComment", () => {
+    it("passes the repo's postSummaryComment setting through to postReview", async () => {
+      await processor.process(buildJob({ postSummaryComment: false }));
+
+      expect(commentService.postReview).toHaveBeenCalledWith(
+        fakeOctokit,
+        expect.objectContaining({ includeSummary: false })
+      );
+    });
+
+    it("defaults to including the summary for jobs queued without the setting", async () => {
+      await processor.process(buildJob());
+
+      expect(commentService.postReview).toHaveBeenCalledWith(
+        fakeOctokit,
+        expect.objectContaining({ includeSummary: true })
+      );
+    });
+
+    it("marks the review DONE without a githubReviewId when nothing was posted", async () => {
+      vi.mocked(commentService.postReview).mockResolvedValue(null);
+
+      await processor.process(buildJob({ postSummaryComment: false }));
+
+      const update = vi.mocked(reviewRepo.update).mock.calls.at(-1)![1];
+      expect(update).toEqual(expect.objectContaining({ status: "DONE" }));
+      expect(update).not.toHaveProperty("githubReviewId");
+      expect(prStatus.complete).toHaveBeenCalledWith("review-1", expect.objectContaining({ githubReviewId: null }));
+    });
   });
 });

@@ -307,6 +307,9 @@ export interface PostReviewInput {
   headSha: string;
   issues: Array<GeminiIssue & { file: string }>;
   summary: string;
+  // RepoConfig.postSummaryComment — false posts the inline comments without the PR-level
+  // summary/severity table. Defaults to true.
+  includeSummary?: boolean;
 }
 
 // The in-progress signals CodeIQ shows on the PR itself while a review runs — an issue comment
@@ -353,7 +356,8 @@ export interface IPrStatusRepository {
 }
 
 export interface ICommentService {
-  postReview(octokit: import("@octokit/rest").Octokit, input: PostReviewInput): Promise<number>;
+  // null when there was nothing to post (summary disabled and no findings at all).
+  postReview(octokit: import("@octokit/rest").Octokit, input: PostReviewInput): Promise<number | null>;
 }
 
 // BullMQ job payload for the coordinator job (review-coordinator-queue) — enqueued only by
@@ -398,4 +402,8 @@ export interface ReviewFinalizeJobData {
   // — carried through rather than re-queried so the finalize job can note it in the summary
   // without an extra DB round trip.
   truncated: boolean;
+  // RepoConfig.postSummaryComment, resolved at Flow-creation time like the chunk jobs'
+  // repoConfig. Optional only so finalize jobs queued before this field existed still run —
+  // undefined is treated as true (the setting's default).
+  postSummaryComment?: boolean;
 }
