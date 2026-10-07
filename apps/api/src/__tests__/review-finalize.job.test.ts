@@ -215,9 +215,9 @@ describe("ReviewFinalizeJobProcessor.process", () => {
   describe("PR status (pr-status.service.ts)", () => {
     it("completes the PR status with the posted review id and severity counts", async () => {
       vi.mocked(reviewIssueRepo.findByReviewId).mockResolvedValue([
-        { line: 1, severity: "critical", category: "bug", message: "m", suggestion: "s", file: "a.ts" },
-        { line: 2, severity: "warning", category: "bug", message: "m", suggestion: "s", file: "a.ts" },
-        { line: 3, severity: "warning", category: "logic", message: "m", suggestion: "s", file: "b.ts" },
+        { line: 1, severity: "critical", category: "bug", message: "m1", suggestion: "s", file: "a.ts" },
+        { line: 2, severity: "warning", category: "bug", message: "m2", suggestion: "s", file: "a.ts" },
+        { line: 3, severity: "warning", category: "logic", message: "m3", suggestion: "s", file: "b.ts" },
       ]);
 
       await processor.process(buildJob());
@@ -283,5 +283,16 @@ describe("ReviewFinalizeJobProcessor.process", () => {
 
     expect(commentService.postReview).not.toHaveBeenCalled();
     expect(reviewRepo.update).toHaveBeenCalledWith("review-1", expect.objectContaining({ status: "FAILED" }));
+  });
+
+  it("posts, summarizes and counts duplicate issues only once", async () => {
+    const dup = { line: 1, severity: "warning" as const, category: "logic" as const, message: "Same thing", suggestion: "s", file: "a.ts" };
+    vi.mocked(reviewIssueRepo.findByReviewId).mockResolvedValue([dup, { ...dup, line: 50 }, { ...dup, line: 99 }]);
+
+    await processor.process(buildJob());
+
+    expect(geminiService.summarizePR).toHaveBeenCalledWith(expect.anything(), [dup]);
+    expect(commentService.postReview).toHaveBeenCalledWith(fakeOctokit, expect.objectContaining({ issues: [dup] }));
+    expect(prStatus.complete).toHaveBeenCalledWith("review-1", expect.objectContaining({ warning: 1 }));
   });
 });

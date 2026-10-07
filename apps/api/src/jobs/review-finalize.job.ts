@@ -2,6 +2,7 @@ import type { Job } from "bullmq";
 import { ALL_TIERS_EXHAUSTED_CHUNK_ERROR } from "./review-chunk.job";
 import { getInstallationOctokit } from "../lib/octokit";
 import type { IInstallationRepository } from "../modules/github/github.types";
+import { dedupeIssues } from "../modules/reviews/dedupe-issues";
 import type {
   ICommentService,
   IGeminiService,
@@ -61,7 +62,9 @@ export class ReviewFinalizeJobProcessor {
       return;
     }
 
-    const allIssues = await this.reviewIssueRepo.findByReviewId(reviewId);
+    // Duplicates (same file + same message, restated by overlapping chunks) collapse to one
+    // before anything is summarized, posted or counted. ReviewIssue rows themselves are kept.
+    const allIssues = dedupeIssues(await this.reviewIssueRepo.findByReviewId(reviewId));
     let summary = await this.geminiService.summarizePR(prTitle, allIssues);
     if (truncated) {
       summary += `\n\n_This PR exceeded the per-review analysis limit — only the largest files were reviewed._`;

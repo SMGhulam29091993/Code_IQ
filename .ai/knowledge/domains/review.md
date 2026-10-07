@@ -385,6 +385,7 @@ already loaded — a retry never re-runs the truncation decision, only the coord
 | Gemini returns malformed JSON | Zod parse fails → chunk job throws → chunk marked FAILED |
 | LLM reports an issue on a line outside the PR's diff hunks | Not posted inline (GitHub would 422 the whole review); listed under "Other findings" in the review body instead |
 | Gemini returns > 50 issues for one chunk | Truncate to the first 50 (Zod `.transform`, not `.max` — `.max` rejected the whole chunk; fixed 2026-10-07) |
+| Same finding restated across overlapping chunks of one file | Finalize collapses issues with the same file + message (case/whitespace-insensitive, line ignored) into one, keeping the most severe — `modules/reviews/dedupe-issues.ts` (2026-10-07: PR #16 had posted 19 copies). `ReviewIssue` rows are not deleted; the dashboard still lists every row |
 | LLM overruns a text limit (message > 200, suggestion > 500, summary > 500 chars) | Truncated with `…`, chunk kept — found live 2026-10-07 when a Qwen message > 200 chars failed a whole chunk with `too_big` |
 | File is binary (no `patch`) | Filter out in `diffService.filterFiles` |
 | File is in ignore pattern | Filter out in `diffService.filterFiles` |
