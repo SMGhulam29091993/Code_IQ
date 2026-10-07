@@ -384,7 +384,8 @@ already loaded — a retry never re-runs the truncation decision, only the coord
 | PR deleted before review finishes | GitHub API returns 404 — mark DONE, log warning |
 | Gemini returns malformed JSON | Zod parse fails → chunk job throws → chunk marked FAILED |
 | LLM reports an issue on a line outside the PR's diff hunks | Not posted inline (GitHub would 422 the whole review); listed under "Other findings" in the review body instead |
-| Gemini returns > 50 issues for one chunk | Truncate at 50 (Zod schema `.max(50)`) |
+| Gemini returns > 50 issues for one chunk | Truncate to the first 50 (Zod `.transform`, not `.max` — `.max` rejected the whole chunk; fixed 2026-10-07) |
+| LLM overruns a text limit (message > 200, suggestion > 500, summary > 500 chars) | Truncated with `…`, chunk kept — found live 2026-10-07 when a Qwen message > 200 chars failed a whole chunk with `too_big` |
 | File is binary (no `patch`) | Filter out in `diffService.filterFiles` |
 | File is in ignore pattern | Filter out in `diffService.filterFiles` |
 | Coordinator job re-delivered (same deliveryId) | BullMQ `jobId` dedup on `review-coordinator-queue` — second enqueue is a no-op |
@@ -565,7 +566,9 @@ Rules:
 describe('GeminiService.reviewDiff', () => {
   it('parses valid Gemini JSON response correctly')
   it('throws ZodError when Gemini returns invalid schema')
-  it('limits issues to 50 (Zod .max(50))')
+  it('truncates to the first 50 issues instead of rejecting the chunk')
+  it('truncates an over-long message, suggestion and summary instead of rejecting the chunk')
+  it('still rejects genuinely malformed issues (unknown severity)')
   it('passes responseMimeType: application/json to force JSON output')
   it('includes filename in system prompt')
   it('includes enabled categories in system prompt')

@@ -18,9 +18,16 @@ export const GetStatsQuerySchema = z.object({
   days: z.coerce.number().int().min(1).max(90, "Days cannot exceed 90").default(30),
 });
 
-// Gemini's raw JSON response for a single diff chunk — .ai/knowledge/domains/review.md
-// "gemini.service.ts reviewDiff". Zod parse failure here means "malformed JSON" per the
-// domain doc's edge-case table — the caller treats it as a failed chunk, not a fatal error.
+// Length/count limits are *truncated to*, never rejected. A `.max()` here used to fail the
+// whole chunk when a model overran a limit by one character — found live 2026-10-07: Qwen wrote
+// a >200-char `message` and Zod threw `too_big`, discarding every other finding in that chunk.
+// Overrunning a soft limit isn't malformed output; only a wrong *shape* is (see below).
+const truncated = (max: number) => z.string().transform((s) => (s.length > max ? `${s.slice(0, max - 1)}…` : s));
+
+// The LLM's raw JSON response for a single diff chunk — .ai/knowledge/domains/review.md
+// "gemini.service.ts reviewDiff". A Zod failure here means genuinely malformed output (wrong
+// types, unknown severity/category) per the domain doc's edge-case table — the caller treats it
+// as a failed chunk, not a fatal error.
 export const GeminiReviewResultSchema = z.object({
   issues: z
     .array(
@@ -28,16 +35,17 @@ export const GeminiReviewResultSchema = z.object({
         line: z.number().int(),
         severity: z.enum(SEVERITY_VALUES),
         category: z.enum(CATEGORY_VALUES),
-        message: z.string().max(200),
-        suggestion: z.string().max(500),
+        message: truncated(200),
+        suggestion: truncated(500),
       })
     )
-    .max(50),
-  summary: z.string().max(500),
+    // "Truncate at 50" per the domain doc — keep the first 50 (the prompt asks for them in
+    // severity order), don't reject the chunk.
+    .transform((issues) => issues.slice(0, 50)),
+  summary: truncated(500),
 });
 
-// Gemini's raw JSON response for GeminiService.summarizePR — same "malformed JSON → caller
-// handles it" stance as GeminiReviewResultSchema above.
+// The LLM's raw JSON response for GeminiService.summarizePR — same truncate-don't-reject stance.
 export const GeminiSummaryResultSchema = z.object({
-  summary: z.string().max(500),
+  summary: truncated(500),
 });
