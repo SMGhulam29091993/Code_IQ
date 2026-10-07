@@ -99,6 +99,8 @@ model Review {
   // Also has totalChunks/completedChunks/truncated (decisions/007 Phase 1, 2026-08-30) — not
   // reflected here yet, pre-existing drift from before this file's last edit, out of scope of
   // the coordinatorJobId addition below.
+  githubStatusCommentId BigInt? // in-progress PR comment — review.md "prStatusService" (2026-10-04)
+  githubCheckRunId      BigInt? // "CodeIQ Review" check run — same
   coordinatorJobId String?      @unique // BullMQ review-coordinator-queue job id — see
   // schema.prisma's own comment on this field for why (idempotency across BullMQ's own retries
   // of the same job, memory/pitfalls.md #016's follow-up, 2026-09-06)
@@ -155,6 +157,7 @@ CREATE INDEX idx_repo_installation ON "Repo"("installationId");
 - [ ] 002_indexes — indexes listed above (`idx_refresh_token_user` dropped from this list —
   see 004 below)
 - ~~003_processed_stripe_events~~ — covered by 001_init, see above
+- [x] `20261004140000_add_review_pr_status_ids` — `Review.githubStatusCommentId`/`githubCheckRunId`. Applied with `prisma migrate deploy` after `migrate resolve --applied 20260913120000_add_review_failure_reason` (that one was hand-applied — pitfall #018 — so Prisma had no record of it); `migrate diff` against the dev DB confirmed zero drift afterwards.
 - [x] 004_drop_refresh_token_table (`20260823105451_drop_refresh_token_table`) — refresh
   tokens moved to Redis, applied 2026-08-23. See `decisions/006-redis-for-refresh-tokens.md`.
 

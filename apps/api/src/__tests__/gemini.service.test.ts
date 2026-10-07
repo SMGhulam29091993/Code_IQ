@@ -64,7 +64,7 @@ describe("GeminiService.reviewDiff", () => {
     await expect(service.reviewDiff("patch", buildConfig(), "f.ts")).rejects.toThrow();
   });
 
-  it("limits issues to 50 (Zod .max(50))", async () => {
+  it("truncates to the first 50 issues instead of rejecting the chunk", async () => {
     const issues = Array.from({ length: 51 }, (_, i) => ({
       line: i,
       severity: "info",
@@ -73,6 +73,34 @@ describe("GeminiService.reviewDiff", () => {
       suggestion: "y",
     }));
     vi.mocked(client.generateContent).mockResolvedValue(mockResponse({ issues, summary: "x" }));
+
+    const result = await service.reviewDiff("patch", buildConfig(), "f.ts");
+
+    expect(result.issues).toHaveLength(50);
+    expect(result.issues[49]!.line).toBe(49);
+  });
+
+  // Found live 2026-10-07: a 201+-char message used to throw `too_big` and lose the whole chunk.
+  it("truncates an over-long message, suggestion and summary instead of rejecting the chunk", async () => {
+    vi.mocked(client.generateContent).mockResolvedValue(
+      mockResponse({
+        issues: [{ line: 1, severity: "warning", category: "bug", message: "m".repeat(250), suggestion: "s".repeat(600) }],
+        summary: "z".repeat(700),
+      })
+    );
+
+    const result = await service.reviewDiff("patch", buildConfig(), "f.ts");
+
+    expect(result.issues[0]!.message).toHaveLength(200);
+    expect(result.issues[0]!.message.endsWith("…")).toBe(true);
+    expect(result.issues[0]!.suggestion).toHaveLength(500);
+    expect(result.summary).toHaveLength(500);
+  });
+
+  it("still rejects genuinely malformed issues (unknown severity)", async () => {
+    vi.mocked(client.generateContent).mockResolvedValue(
+      mockResponse({ issues: [{ line: 1, severity: "blocker", category: "bug", message: "m", suggestion: "s" }], summary: "x" })
+    );
 
     await expect(service.reviewDiff("patch", buildConfig(), "f.ts")).rejects.toThrow();
   });

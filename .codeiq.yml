@@ -1,0 +1,14 @@
+# CodeIQ review settings for this repo — read from the default branch on every review and
+# merged over the dashboard's repo config field by field (apps/api/src/modules/repos/
+# config.service.ts). `ignorePatterns` REPLACES the dashboard list rather than adding to it,
+# so the dashboard defaults are repeated here.
+ignorePatterns:
+  - "*.test.ts"
+  - "*.spec.ts"
+  # `**/` prefix: a pattern containing a slash only matches from the repo root, so the
+  # dashboard's plain "dist/**" misses build output under apps/*/dist in this monorepo.
+  - "**/dist/**"
+  - "**/node_modules/**"
+  # Docs (.ai/ project docs, READMEs): a code-review prompt on prose produces mostly noise —
+  # ~60% of the comments on PR #15/#16 were on .md files. Slash-less, so it matches at any depth.
+  - "*.md"

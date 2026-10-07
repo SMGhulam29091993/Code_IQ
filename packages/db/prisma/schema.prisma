@@ -111,6 +111,13 @@ model Review {
   // rest; the API layer (review.service.ts's sanitizeReview) converts back to a plain JS
   // number for the wire, safe since GitHub ids stay well under Number.MAX_SAFE_INTEGER.
   githubReviewId   BigInt?
+  // The in-progress signals shown on the PR while a review runs (CodeRabbit-style), owned by
+  // modules/reviews/pr-status.service.ts: an issue comment edited in place ("in progress" →
+  // live chunk progress → result line) and a "CodeIQ Review" check run. BigInt for the same
+  // reason as githubReviewId. Null until posted, and stays null if posting failed (best-effort)
+  // — the check run in particular needs the GitHub App's Checks: write permission.
+  githubStatusCommentId BigInt?
+  githubCheckRunId      BigInt?
   totalChunks      Int           @default(0)
   completedChunks  Int           @default(0) // denormalized live-progress counter, UI-only — the
   // finalize job re-queries ReviewChunk rows directly for the DONE/FAILED gating decision, never

@@ -309,6 +309,49 @@ export interface PostReviewInput {
   summary: string;
 }
 
+// The in-progress signals CodeIQ shows on the PR itself while a review runs — an issue comment
+// edited in place and a "CodeIQ Review" check run (modules/reviews/pr-status.service.ts). Every
+// method is best-effort: it logs and returns instead of throwing, so a GitHub hiccup (or a
+// missing Checks permission) never fails the review it's reporting on.
+export interface IPrStatusService {
+  // Posts (or, on a retry, resets) the "review in progress" comment and opens a new check run.
+  start(reviewId: string): Promise<void>;
+  // Live "N / M sections analysed" — throttled per review, so most calls are a single Redis SET.
+  progress(reviewId: string): Promise<void>;
+  // githubReviewId null = nothing posted (e.g. no reviewable files); `note` replaces the counts.
+  complete(reviewId: string, result: PrStatusResult): Promise<void>;
+  fail(reviewId: string, failureReason: string | null): Promise<void>;
+}
+
+export interface PrStatusResult {
+  githubReviewId: number | null;
+  critical: number;
+  warning: number;
+  info: number;
+  // Chunks that never reached DONE (failed or stalled out) — surfaced on the PR so a partial
+  // review isn't presented as complete.
+  gaps?: number;
+  note?: string;
+}
+
+export interface PrStatusContext {
+  owner: string;
+  repo: string;
+  prNumber: number;
+  headSha: string;
+  githubInstallationId: number;
+  statusCommentId: number | null;
+  checkRunId: number | null;
+}
+
+export interface IPrStatusRepository {
+  findContext(reviewId: string): Promise<PrStatusContext | null>;
+  saveStatusIds(reviewId: string, ids: { statusCommentId?: number; checkRunId?: number }): Promise<void>;
+  // DONE + FAILED chunks vs. all chunks — real ReviewChunk rows, not Review.completedChunks,
+  // which over-counts across chunk retries (review-chunk.job.ts).
+  countChunkProgress(reviewId: string): Promise<{ settled: number; total: number }>;
+}
+
 export interface ICommentService {
   postReview(octokit: import("@octokit/rest").Octokit, input: PostReviewInput): Promise<number>;
 }

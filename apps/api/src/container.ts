@@ -9,6 +9,7 @@ import { ReviewFinalizeJobProcessor } from "./jobs/review-finalize.job";
 import { FairnessService } from "./lib/fairness";
 import { llmClient } from "./lib/llm-client";
 import { LlmExhaustionService } from "./lib/llm-exhaustion";
+import { getInstallationOctokit } from "./lib/octokit";
 import { redis } from "./lib/redis";
 import { stripeClient } from "./lib/stripe";
 import { AuthController } from "./modules/auth/auth.controller";
@@ -34,6 +35,8 @@ import { RepoService } from "./modules/repos/repo.service";
 import { CommentService } from "./modules/reviews/comment.service";
 import { DiffService } from "./modules/reviews/diff.service";
 import { GeminiService } from "./modules/reviews/gemini.service";
+import { PrStatusRepository } from "./modules/reviews/pr-status.repository";
+import { PrStatusService } from "./modules/reviews/pr-status.service";
 import { ReviewChunkRepository } from "./modules/reviews/review-chunk.repository";
 import { ReviewIssueRepository } from "./modules/reviews/review-issue.repository";
 import { ReviewController } from "./modules/reviews/review.controller";
@@ -107,6 +110,7 @@ const geminiService = new GeminiService(llmClient);
 const commentService = new CommentService();
 const fairnessService = new FairnessService(redis);
 const llmExhaustionService = new LlmExhaustionService(redis);
+const prStatusService = new PrStatusService(new PrStatusRepository(), redis, getInstallationOctokit);
 
 const reviewService = new ReviewService(
   reviewRepository,
@@ -114,7 +118,8 @@ const reviewService = new ReviewService(
   reviewChunkRepository,
   installationRepository,
   configService,
-  fairnessService
+  fairnessService,
+  prStatusService
 );
 
 export const reviewController = new ReviewController(reviewService);
@@ -130,7 +135,8 @@ export const reviewCoordinatorJobProcessor = new ReviewCoordinatorJobProcessor(
   diffService,
   reviewChunkRepository,
   fairnessService,
-  reviewFlowProducer
+  reviewFlowProducer,
+  prStatusService
 );
 
 export const reviewChunkJobProcessor = new ReviewChunkJobProcessor(
@@ -139,7 +145,8 @@ export const reviewChunkJobProcessor = new ReviewChunkJobProcessor(
   reviewChunkRepository,
   geminiService,
   fairnessService,
-  llmExhaustionService
+  llmExhaustionService,
+  prStatusService
 );
 
 export const reviewFinalizeJobProcessor = new ReviewFinalizeJobProcessor(
@@ -148,5 +155,6 @@ export const reviewFinalizeJobProcessor = new ReviewFinalizeJobProcessor(
   reviewChunkRepository,
   installationRepository,
   geminiService,
-  commentService
+  commentService,
+  prStatusService
 );

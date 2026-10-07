@@ -317,6 +317,37 @@ processFinalizeJob(job):
   })
 ```
 
+### prStatusService (`modules/reviews/pr-status.service.ts`) — in-progress signals on the PR
+
+CodeRabbit-style feedback on the PR page while a review runs (added 2026-10-04). Two independent,
+best-effort signals — every GitHub call is caught and logged, never thrown, so neither can fail
+the review it reports on:
+
+1. **Status comment** (issue comment, hidden `<!-- codeiq-status -->` marker), edited in place:
+   `🔄 CodeIQ review in progress` → `Progress: N / M sections analysed` → `✅ CodeIQ review
+   complete` (severity counts + link to the posted review) or `❌ could not be completed`
+   (FREE_TIER_EXHAUSTED gets the quota message). Needs only `pull_requests: write`.
+2. **`CodeIQ Review` check run** on the head commit: `in_progress` → `completed`. Conclusion is
+   `success` whenever a review was posted (regardless of findings) and `neutral` when it
+   couldn't complete — **never `failure`**, so branch protection can't turn CodeIQ into a merge
+   gate (`event: 'COMMENT'` stance, `memory/lessons.md` #001). Needs the GitHub App's
+   **Checks: Read & write** permission; without it the 403 is logged once per process and the
+   comment still works.
+
+| Pipeline point | Call |
+|---|---|
+| Coordinator, after resolving repo context, before fan-out | `start(reviewId)` — creates the comment (or resets it on a retry) and a new check run (closing any previous one as "Superseded") |
+| Coordinator: no reviewable files | `complete(reviewId, { githubReviewId: null, note })` |
+| Coordinator throws | `fail(reviewId, null)` (reset by `start` if BullMQ retries) |
+| Each chunk job's `finally` | `progress(reviewId)` — throttled to one GitHub edit per review per 15s (Redis `SET … NX EX 15`); counts real `ReviewChunk` DONE+FAILED rows, not the over-counting `completedChunks` |
+| Finalize: all chunks failed | `fail(reviewId, failureReason)` |
+| Finalize: `postReview` throws | `fail(reviewId, null)`, then rethrow |
+| Finalize: posted | `complete(reviewId, { githubReviewId, critical, warning, info, gaps })` — `gaps` = chunks that never reached DONE (failed or stalled), shown as a ⚠️ line so a partial review isn't presented as complete |
+| `POST /reviews/:id/retry` | `start(reviewId)` |
+
+Comment/check-run ids live on `Review.githubStatusCommentId`/`githubCheckRunId` (BigInt, via the
+narrow `PrStatusRepository`).
+
 ### fairnessService (`lib/fairness.ts`) — per-installation fair queuing (decisions/007 Phase 4)
 
 Substitute for BullMQ Pro's paid per-group rate limiting: track each installation's currently
@@ -353,7 +384,9 @@ already loaded — a retry never re-runs the truncation decision, only the coord
 | PR deleted before review finishes | GitHub API returns 404 — mark DONE, log warning |
 | Gemini returns malformed JSON | Zod parse fails → chunk job throws → chunk marked FAILED |
 | LLM reports an issue on a line outside the PR's diff hunks | Not posted inline (GitHub would 422 the whole review); listed under "Other findings" in the review body instead |
-| Gemini returns > 50 issues for one chunk | Truncate at 50 (Zod schema `.max(50)`) |
+| Gemini returns > 50 issues for one chunk | Truncate to the first 50 (Zod `.transform`, not `.max` — `.max` rejected the whole chunk; fixed 2026-10-07) |
+| Same finding restated across overlapping chunks of one file | Finalize collapses issues with the same file + message (case/whitespace-insensitive, line ignored) into one, keeping the most severe — `modules/reviews/dedupe-issues.ts` (2026-10-07: PR #16 had posted 19 copies). `ReviewIssue` rows are not deleted; the dashboard still lists every row |
+| LLM overruns a text limit (message > 200, suggestion > 500, summary > 500 chars) | Truncated with `…`, chunk kept — found live 2026-10-07 when a Qwen message > 200 chars failed a whole chunk with `too_big` |
 | File is binary (no `patch`) | Filter out in `diffService.filterFiles` |
 | File is in ignore pattern | Filter out in `diffService.filterFiles` |
 | Coordinator job re-delivered (same deliveryId) | BullMQ `jobId` dedup on `review-coordinator-queue` — second enqueue is a no-op |
@@ -534,7 +567,9 @@ Rules:
 describe('GeminiService.reviewDiff', () => {
   it('parses valid Gemini JSON response correctly')
   it('throws ZodError when Gemini returns invalid schema')
-  it('limits issues to 50 (Zod .max(50))')
+  it('truncates to the first 50 issues instead of rejecting the chunk')
+  it('truncates an over-long message, suggestion and summary instead of rejecting the chunk')
+  it('still rejects genuinely malformed issues (unknown severity)')
   it('passes responseMimeType: application/json to force JSON output')
   it('includes filename in system prompt')
   it('includes enabled categories in system prompt')

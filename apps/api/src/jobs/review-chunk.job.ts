@@ -5,6 +5,7 @@ import type {
   IFairnessService,
   IGeminiService,
   ILlmExhaustionService,
+  IPrStatusService,
   IReviewChunkRepository,
   IReviewIssueRepository,
   IReviewRepository,
@@ -40,7 +41,8 @@ export class ReviewChunkJobProcessor {
     private readonly reviewChunkRepo: IReviewChunkRepository,
     private readonly geminiService: IGeminiService,
     private readonly fairnessService: IFairnessService,
-    private readonly llmExhaustionService: ILlmExhaustionService
+    private readonly llmExhaustionService: ILlmExhaustionService,
+    private readonly prStatus: IPrStatusService
   ) {}
 
   async process(job: Job<ReviewChunkJobData>): Promise<void> {
@@ -79,6 +81,8 @@ export class ReviewChunkJobProcessor {
       // knowledge/technical/backend/review-pipeline-scaling.md.
       await this.reviewRepo.incrementCompletedChunks(reviewId);
       await this.fairnessService.markInFlight(installationId, -1);
+      // Live "N / M sections analysed" on the PR — throttled per review, never throws.
+      await this.prStatus.progress(reviewId);
     }
   }
 }

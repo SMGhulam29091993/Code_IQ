@@ -14,6 +14,13 @@ import type {
   ReviewFinalizeJobData,
 } from "../modules/reviews/review.types";
 
+// pr-status.service.ts is best-effort and fully mocked here — its own behavior is covered by
+// pr-status.service.test.ts.
+function buildPrStatus() {
+  return { start: vi.fn(), progress: vi.fn(), complete: vi.fn(), fail: vi.fn() };
+}
+let prStatus: ReturnType<typeof buildPrStatus>;
+
 const { fakeOctokit } = vi.hoisted(() => ({ fakeOctokit: { rest: {} } }));
 vi.mock("../lib/octokit", () => ({
   getInstallationOctokit: vi.fn().mockReturnValue(fakeOctokit),
@@ -96,13 +103,15 @@ describe("ReviewFinalizeJobProcessor.process", () => {
     };
     commentService = { postReview: vi.fn().mockResolvedValue(777) };
 
+    prStatus = buildPrStatus();
     processor = new ReviewFinalizeJobProcessor(
       reviewRepo,
       reviewIssueRepo,
       reviewChunkRepo,
       installationRepo,
       geminiService,
-      commentService
+      commentService,
+      prStatus
     );
   });
 
@@ -203,6 +212,46 @@ describe("ReviewFinalizeJobProcessor.process", () => {
     );
   });
 
+  describe("PR status (pr-status.service.ts)", () => {
+    it("completes the PR status with the posted review id and severity counts", async () => {
+      vi.mocked(reviewIssueRepo.findByReviewId).mockResolvedValue([
+        { line: 1, severity: "critical", category: "bug", message: "m1", suggestion: "s", file: "a.ts" },
+        { line: 2, severity: "warning", category: "bug", message: "m2", suggestion: "s", file: "a.ts" },
+        { line: 3, severity: "warning", category: "logic", message: "m3", suggestion: "s", file: "b.ts" },
+      ]);
+
+      await processor.process(buildJob());
+
+      expect(prStatus.complete).toHaveBeenCalledWith("review-1", {
+        githubReviewId: 777,
+        critical: 1,
+        warning: 2,
+        info: 0,
+        gaps: 0,
+      });
+    });
+
+    it("marks the PR status failed with the failure reason when every chunk failed", async () => {
+      vi.mocked(reviewChunkRepo.findByReviewId).mockResolvedValue([
+        buildChunk({ status: "FAILED", error: ALL_TIERS_EXHAUSTED_CHUNK_ERROR }),
+      ]);
+
+      await processor.process(buildJob());
+
+      expect(prStatus.fail).toHaveBeenCalledWith("review-1", "FREE_TIER_EXHAUSTED");
+      expect(prStatus.complete).not.toHaveBeenCalled();
+    });
+
+    it("marks the PR status failed and rethrows when posting the review fails", async () => {
+      vi.mocked(commentService.postReview).mockRejectedValue(new Error("422 Line could not be resolved"));
+
+      await expect(processor.process(buildJob())).rejects.toThrow("422");
+
+      expect(prStatus.fail).toHaveBeenCalledWith("review-1", null);
+      expect(prStatus.complete).not.toHaveBeenCalled();
+    });
+  });
+
   // pitfall #021: a chunk job BullMQ fails for stalling never reaches its catch block, so its row
   // is still RUNNING when finalize runs — it's a gap, not a success.
   it("counts a chunk stranded at RUNNING as a gap in the summary", async () => {
@@ -221,6 +270,7 @@ describe("ReviewFinalizeJobProcessor.process", () => {
         summary: expect.stringContaining("1 file section(s) could not be analyzed"),
       })
     );
+    expect(prStatus.complete).toHaveBeenCalledWith("review-1", expect.objectContaining({ gaps: 1 }));
   });
 
   it("marks the review FAILED when every chunk is stranded at RUNNING", async () => {
@@ -233,5 +283,16 @@ describe("ReviewFinalizeJobProcessor.process", () => {
 
     expect(commentService.postReview).not.toHaveBeenCalled();
     expect(reviewRepo.update).toHaveBeenCalledWith("review-1", expect.objectContaining({ status: "FAILED" }));
+  });
+
+  it("posts, summarizes and counts duplicate issues only once", async () => {
+    const dup = { line: 1, severity: "warning" as const, category: "logic" as const, message: "Same thing", suggestion: "s", file: "a.ts" };
+    vi.mocked(reviewIssueRepo.findByReviewId).mockResolvedValue([dup, { ...dup, line: 50 }, { ...dup, line: 99 }]);
+
+    await processor.process(buildJob());
+
+    expect(geminiService.summarizePR).toHaveBeenCalledWith(expect.anything(), [dup]);
+    expect(commentService.postReview).toHaveBeenCalledWith(fakeOctokit, expect.objectContaining({ issues: [dup] }));
+    expect(prStatus.complete).toHaveBeenCalledWith("review-1", expect.objectContaining({ warning: 1 }));
   });
 });

@@ -2,9 +2,11 @@ import type { Job } from "bullmq";
 import { ALL_TIERS_EXHAUSTED_CHUNK_ERROR } from "./review-chunk.job";
 import { getInstallationOctokit } from "../lib/octokit";
 import type { IInstallationRepository } from "../modules/github/github.types";
+import { dedupeIssues } from "../modules/reviews/dedupe-issues";
 import type {
   ICommentService,
   IGeminiService,
+  IPrStatusService,
   IReviewChunkRepository,
   IReviewIssueRepository,
   IReviewRepository,
@@ -27,7 +29,8 @@ export class ReviewFinalizeJobProcessor {
     private readonly reviewChunkRepo: IReviewChunkRepository,
     private readonly installationRepo: IInstallationRepository,
     private readonly geminiService: IGeminiService,
-    private readonly commentService: ICommentService
+    private readonly commentService: ICommentService,
+    private readonly prStatus: IPrStatusService
   ) {}
 
   async process(job: Job<ReviewFinalizeJobData>): Promise<void> {
@@ -55,10 +58,13 @@ export class ReviewFinalizeJobProcessor {
         status: "FAILED",
         failureReason: exhausted ? "FREE_TIER_EXHAUSTED" : null,
       });
+      await this.prStatus.fail(reviewId, exhausted ? "FREE_TIER_EXHAUSTED" : null);
       return;
     }
 
-    const allIssues = await this.reviewIssueRepo.findByReviewId(reviewId);
+    // Duplicates (same file + same message, restated by overlapping chunks) collapse to one
+    // before anything is summarized, posted or counted. ReviewIssue rows themselves are kept.
+    const allIssues = dedupeIssues(await this.reviewIssueRepo.findByReviewId(reviewId));
     let summary = await this.geminiService.summarizePR(prTitle, allIssues);
     if (truncated) {
       summary += `\n\n_This PR exceeded the per-review analysis limit — only the largest files were reviewed._`;
@@ -73,20 +79,36 @@ export class ReviewFinalizeJobProcessor {
     }
     const octokit = getInstallationOctokit(installation.githubInstallationId);
 
-    const githubReviewId = await this.commentService.postReview(octokit, {
-      owner,
-      repo,
-      prNumber,
-      headSha,
-      issues: allIssues,
-      summary,
-    });
+    let githubReviewId: number;
+    try {
+      githubReviewId = await this.commentService.postReview(octokit, {
+        owner,
+        repo,
+        prNumber,
+        headSha,
+        issues: allIssues,
+        summary,
+      });
+    } catch (err) {
+      // Keep the PR's status comment honest instead of leaving it at "in progress" — if BullMQ
+      // retries this job and the post succeeds, complete() below overwrites it.
+      await this.prStatus.fail(reviewId, null);
+      throw err;
+    }
 
     await this.reviewRepo.update(reviewId, {
       status: "DONE",
       summary,
       filesReviewed: new Set(doneChunks.map((chunk) => chunk.filename)).size,
       githubReviewId,
+    });
+
+    await this.prStatus.complete(reviewId, {
+      githubReviewId,
+      critical: allIssues.filter((i) => i.severity === "critical").length,
+      warning: allIssues.filter((i) => i.severity === "warning").length,
+      info: allIssues.filter((i) => i.severity === "info").length,
+      gaps: failedChunks.length,
     });
   }
 }

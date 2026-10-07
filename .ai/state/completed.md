@@ -1,6 +1,16 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-10-07 (Fixes from PR #15/#16's own reviews — branch `feat/pr-review-status`)
+- Stopped the stale `api-api-1` container (2026-09-06 image) that was consuming the same BullMQ
+  queues as `turbo run dev`. `b01ef0b`: LLM output limits truncate instead of rejecting a chunk.
+  `ee0681a`: finalize de-duplicates issues by file + message. `ac44d08`: state refreshed.
+- New repo-root `.codeiq.yml`: stops reviewing docs (`*.md`) per user decision, and repeats the
+  dashboard defaults (it *replaces* `ignorePatterns`, config.service.ts) with `**/dist/**` /
+  `**/node_modules/**` — the dashboard's `dist/**` only matches a root-level `dist/`, missing
+  `apps/*/dist`. Verified against the real `DiffService.filterFiles` + `YamlConfigSchema`. Takes
+  effect only once on the default branch (`Dev`) — config.service reads the default branch.
+
 ## 2026-10-07 (Ollama output cap — branch `feat/ollama-local-llm`, merged into `feat/pr-review-status`)
 - Investigated the 2026-10-04 `timed out after 300000ms`: re-ran PR #15's real summary (55
   issues → 2.7s, 40 tokens) and the largest real chunk (152 lines → 62.7s, 662 tokens) against
@@ -10,6 +20,16 @@
   `done_reason: "length"` as a non-retryable `LLMClientError` so a cut-off answer falls through to
   Gemini instead of failing JSON parsing outside the fallback chain. Live-verified (cap 10 → error,
   2048 → ok). 2 new tests. decisions/009 addendum.
+## 2026-10-04 (`feat/pr-review-status` brought up to date — Dev + `feat/ollama-local-llm` merged in)
+- `Dev` was already an ancestor (no-op merge). Merged `feat/ollama-local-llm` (`99ca058`):
+  conflicts only in `state/current.md`, `state/completed.md` and `review-finalize.job.test.ts` —
+  all "both sides appended" conflicts, resolved by keeping both. Verified the merged jobs/retry
+  carry both `ignoreDependencyOnFailure: true` and the `prStatus` calls.
+- Integration fix on top: `PrStatusResult.gaps` — finalize passes the non-DONE chunk count, and
+  the PR status comment shows "⚠️ N file section(s) could not be analysed" so a partial review
+  (e.g. stalled chunks, pitfall #021) isn't presented on the PR as complete.
+- 432/432 API tests, typecheck, lint clean. Not pushed from this session (no SSH key access —
+  user pushes).
 
 ## 2026-10-04 (Fix: Flow parent blocked forever by any failed chunk — branch `feat/ollama-local-llm`)
 - Root cause of PR #15 (and earlier PR #10/#8) stuck `RUNNING`: chunk children used
@@ -20,6 +40,25 @@
   counts any non-DONE chunk as a gap (stalled rows stay `RUNNING`); `ReviewChunkRepository.
   findIncomplete` includes `RUNNING`. 2 new finalize tests; 408/408, typecheck, lint clean.
 - Docs: decisions/007 addendum, pitfall #021, `review.md`, `review-pipeline-scaling.md`.
+
+## 2026-10-04 (PR in-progress status comment + check run — branch `feat/pr-review-status`)
+- New `PrStatusService` (`modules/reviews/pr-status.service.ts`) + `PrStatusRepository`: status
+  comment edited in place (in progress → throttled live progress → ✅ result w/ counts + review
+  link, or ❌ reason) and a `CodeIQ Review` check run (`success` when posted, `neutral` on
+  failure — never `failure`, non-blocking stance). All calls best-effort; check-run 403 (missing
+  Checks permission) logged once per process. Previous check run closed as "Superseded" on
+  retry. Progress throttled via Redis `SET NX EX 15`, counted from real ReviewChunk rows.
+- Hooked into `review-coordinator.job.ts` (start / no-files complete / fail), `review-chunk.job.ts`
+  (progress in `finally`), `review-finalize.job.ts` (complete / all-failed fail / post-failure
+  fail), `ReviewService.retryReview` (start); wired in `container.ts`.
+- Schema: `Review.githubStatusCommentId`/`githubCheckRunId` BigInt?, migration
+  `20261004140000_add_review_pr_status_ids`. Also recorded the hand-applied
+  `20260913120000_add_review_failure_reason` via `migrate resolve --applied` (pitfall #018) —
+  `migrate diff` now reports no drift.
+- Tests: new `pr-status.service.test.ts` (17), hook tests in coordinator (3), chunk (1),
+  finalize (3), review.service (1). 429/429, typecheck, lint clean.
+- Docs: `knowledge/domains/review.md` (prStatusService section), `knowledge/domains/github-app.md`
+  (Required App permissions table), `plans/database.md`.
 
 ## 2026-10-04 (Fixes from the first real Ollama pipeline run — branch `feat/ollama-local-llm`)
 Re-ran the two real stuck reviews (PR #10 resumable retry of its 8 failed chunks; PR #8 as a

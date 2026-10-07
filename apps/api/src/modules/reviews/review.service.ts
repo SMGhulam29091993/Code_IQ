@@ -4,6 +4,7 @@ import type {
   GetReviewResult,
   GetStatsFilters,
   IFairnessService,
+  IPrStatusService,
   IReviewChunkRepository,
   IReviewRepository,
   IReviewService,
@@ -32,7 +33,8 @@ export class ReviewService implements IReviewService {
     private readonly reviewChunkRepo: IReviewChunkRepository,
     private readonly installationRepo: IInstallationRepository,
     private readonly configService: ConfigService,
-    private readonly fairnessService: IFairnessService
+    private readonly fairnessService: IFairnessService,
+    private readonly prStatus: IPrStatusService
   ) {}
 
   async listReviews(userId: string, filters: ListReviewsFilters): Promise<ListReviewsResult> {
@@ -67,6 +69,8 @@ export class ReviewService implements IReviewService {
 
     const incomplete = await this.reviewChunkRepo.findIncomplete(reviewId);
     const updated = await this.reviewRepo.update(reviewId, { status: "RUNNING" });
+    // Resets the PR's status comment to "in progress" and opens a fresh check run — best-effort.
+    await this.prStatus.start(reviewId);
 
     try {
       // Resolved once here (not per chunk) for the same reason the coordinator job does it once

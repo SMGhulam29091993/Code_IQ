@@ -16,6 +16,13 @@ import type {
   ReviewCoordinatorJobData,
 } from "../modules/reviews/review.types";
 
+// pr-status.service.ts is best-effort and fully mocked here — its own behavior is covered by
+// pr-status.service.test.ts.
+function buildPrStatus() {
+  return { start: vi.fn(), progress: vi.fn(), complete: vi.fn(), fail: vi.fn() };
+}
+let prStatus: ReturnType<typeof buildPrStatus>;
+
 const { fakeOctokit } = vi.hoisted(() => ({
   fakeOctokit: { rest: {}, pulls: { listFiles: vi.fn() } },
 }));
@@ -66,6 +73,8 @@ function buildReview(overrides: Partial<Review> = {}): Review {
     truncated: false,
     failureReason: null,
     coordinatorJobId: null,
+    githubStatusCommentId: null,
+    githubCheckRunId: null,
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,
@@ -148,6 +157,7 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
 
     fakeOctokit.pulls.listFiles.mockResolvedValue({ data: [buildDiffFile()] });
 
+    prStatus = buildPrStatus();
     processor = new ReviewCoordinatorJobProcessor(
       reviewRepo,
       installationRepo,
@@ -155,7 +165,8 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
       diffService,
       reviewChunkRepo,
       fairnessService,
-      flowProducer
+      flowProducer,
+      prStatus
     );
   });
 
@@ -340,5 +351,35 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
     expect(diffService.prioritizeFiles).toHaveBeenCalledWith([
       expect.objectContaining({ filename: "src/index.ts" }),
     ]);
+  });
+
+  describe("PR status (pr-status.service.ts)", () => {
+    it("starts the PR status before fanning out, so chunk progress can find its ids", async () => {
+      await processor.process(buildJob());
+
+      expect(prStatus.start).toHaveBeenCalledWith("review-1");
+      expect(prStatus.start.mock.invocationCallOrder[0]!).toBeLessThan(
+        vi.mocked(flowProducer.add).mock.invocationCallOrder[0]!
+      );
+    });
+
+    it("completes the PR status with a note when every file is filtered out", async () => {
+      vi.mocked(diffService.filterFiles).mockReturnValue([]);
+
+      await processor.process(buildJob());
+
+      expect(prStatus.complete).toHaveBeenCalledWith(
+        "review-1",
+        expect.objectContaining({ githubReviewId: null, note: expect.stringContaining("No reviewable files") })
+      );
+    });
+
+    it("marks the PR status failed when the coordinator throws", async () => {
+      vi.mocked(installationRepo.findById).mockResolvedValue(null);
+
+      await expect(processor.process(buildJob())).rejects.toThrow();
+
+      expect(prStatus.fail).toHaveBeenCalledWith("review-1", null);
+    });
   });
 });
