@@ -1,4 +1,5 @@
 import type { Octokit } from "@octokit/rest";
+import { listAllPullRequestFiles } from "./pr-files";
 import type { GeminiIssue, ICommentService, PostReviewInput } from "./review.types";
 
 const SEVERITY_ICON: Record<string, string> = { critical: "🔴", warning: "🟡", info: "🔵" };
@@ -6,7 +7,6 @@ const SEVERITY_ICON: Record<string, string> = { critical: "🔴", warning: "🟡
 // Unanchored findings listed in the summary body, capped so a noisy review can't push the body
 // past GitHub's 65,536-character review-body limit.
 const MAX_UNANCHORED_IN_SUMMARY = 50;
-const LIST_FILES_PAGE_SIZE = 100;
 
 // .ai/knowledge/domains/review.md "comment.service.ts".
 export class CommentService implements ICommentService {
@@ -57,22 +57,9 @@ async function fetchCommentableLines(
   repo: string,
   prNumber: number
 ): Promise<Map<string, Set<number>>> {
-  // Manual page loop, not octokit.paginate — the pinned CJS Octokit v19 (memory/pitfalls.md
-  // #007) pulls in two @octokit/types versions whose RequestInterface types don't unify, so
-  // paginate(pulls.listFiles) doesn't typecheck. GitHub caps this endpoint at 3000 files.
   const result = new Map<string, Set<number>>();
-  for (let page = 1; ; page++) {
-    const { data: files } = await octokit.pulls.listFiles({
-      owner,
-      repo,
-      pull_number: prNumber,
-      per_page: LIST_FILES_PAGE_SIZE,
-      page,
-    });
-    for (const file of files) {
-      if (file.patch) result.set(file.filename, parseCommentableLines(file.patch));
-    }
-    if (files.length < LIST_FILES_PAGE_SIZE) break;
+  for (const file of await listAllPullRequestFiles(octokit, owner, repo, prNumber)) {
+    if (file.patch) result.set(file.filename, parseCommentableLines(file.patch));
   }
   return result;
 }

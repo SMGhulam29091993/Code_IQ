@@ -269,6 +269,22 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
     expect(flowProducer.add).not.toHaveBeenCalled();
   });
 
+  // 2026-10-08: listFiles was called without paging, so only the first 30 files were reviewed.
+  it("reviews every file of a PR larger than one page of listFiles", async () => {
+    const page1 = Array.from({ length: 100 }, (_, i) => buildDiffFile({ filename: `p1-${i}.ts` }));
+    const page2 = [buildDiffFile({ filename: "late-file.ts" })];
+    fakeOctokit.pulls.listFiles.mockResolvedValueOnce({ data: page1 }).mockResolvedValueOnce({ data: page2 });
+
+    await processor.process(buildJob());
+
+    expect(fakeOctokit.pulls.listFiles).toHaveBeenCalledWith(expect.objectContaining({ per_page: 100, page: 2 }));
+    expect(diffService.filterFiles).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ filename: "late-file.ts" })]),
+      expect.anything()
+    );
+    expect(vi.mocked(diffService.filterFiles).mock.calls[0]![0]).toHaveLength(101);
+  });
+
   it("persists a ReviewChunk row per chunk and records totalChunks before fanning out", async () => {
     fakeOctokit.pulls.listFiles.mockResolvedValue({
       data: [buildDiffFile({ filename: "a.ts" }), buildDiffFile({ filename: "b.ts" })],

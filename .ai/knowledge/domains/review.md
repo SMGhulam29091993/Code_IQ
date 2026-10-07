@@ -207,8 +207,9 @@ processCoordinatorJob(job):
   // through every chunk job's data (resolve-review-context.ts) — never re-fetched per chunk.
   { octokit, owner, repo, repoConfig } = await resolveReviewContext(repoId, repoFullName, installationId, ...)
 
-  // 4. Fetch PR diff
-  files = await octokit.pulls.listFiles({ owner, repo, pull_number: prNumber })
+  // 4. Fetch PR diff — EVERY page (listAllPullRequestFiles, 100/page, GitHub max 3000 files).
+  // A bare listFiles call returns only the first 30 files (fixed 2026-10-08).
+  files = await listAllPullRequestFiles(octokit, owner, repo, prNumber)
 
   // 5. Filter files by ignore patterns and config
   filesToReview = diffService.filterFiles(files, repoConfig)
@@ -387,6 +388,7 @@ already loaded — a retry never re-runs the truncation decision, only the coord
 | Gemini returns > 50 issues for one chunk | Truncate to the first 50 (Zod `.transform`, not `.max` — `.max` rejected the whole chunk; fixed 2026-10-07) |
 | Same finding restated across overlapping chunks of one file | Finalize collapses issues with the same file + message (case/whitespace-insensitive, line ignored) into one, keeping the most severe — `modules/reviews/dedupe-issues.ts` (2026-10-07: PR #16 had posted 19 copies). `ReviewIssue` rows are not deleted; the dashboard still lists every row |
 | LLM overruns a text limit (message > 200, suggestion > 500, summary > 500 chars) | Truncated with `…`, chunk kept — found live 2026-10-07 when a Qwen message > 200 chars failed a whole chunk with `too_big` |
+| PR touches more than 30 files | All pages of `pulls.listFiles` are read (`modules/reviews/pr-files.ts`). Before 2026-10-08 only the first 30 files were ever reviewed |
 | File is binary (no `patch`) | Filter out in `diffService.filterFiles` |
 | File is in ignore pattern | Filter out in `diffService.filterFiles` |
 | Coordinator job re-delivered (same deliveryId) | BullMQ `jobId` dedup on `review-coordinator-queue` — second enqueue is a no-op |
