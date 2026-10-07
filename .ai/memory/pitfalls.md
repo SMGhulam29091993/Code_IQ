@@ -50,6 +50,7 @@
 **Symptom:** N/A yet (caught in review, not production) — `RepoConfig.ignorePatterns`'s Prisma column default (`["*.test.ts", "*.spec.ts", "dist/**"]`) is missing `"node_modules/**"`, which `.ai/knowledge/domains/repos.md` documents as part of the default config.
 **Root cause:** The domain doc's default config (used by `repo.types.ts`'s `DEFAULT_REPO_CONFIG`) was written after the schema, and the schema's own `@default` was never updated to match.
 **Fix:** Never rely on a Prisma column `@default` to enforce a documented default — always pass every field explicitly from a single source of truth (`DEFAULT_REPO_CONFIG`) on create, as `repo-config.repository.ts` does. The schema-level default is currently dead code but should still be fixed in a migration before something bypasses the repository layer.
+**Resolved 2026-10-08:** migration `20261008100000_fix_repo_config_ignore_patterns_default` sets the column default to match, and `__tests__/repo-config-defaults.test.ts` now fails if any RepoConfig `@default` and `DEFAULT_REPO_CONFIG` disagree again.
 
 ## 011 — micromatch's `{ basename: true }` breaks matching for slash-containing patterns
 **Symptom:** `diff.service.ts`'s `filterFiles` unit test expected `ignorePatterns: ["dist/**"]` to exclude `"dist/out.js"`, but the file was kept — `micromatch.isMatch("dist/out.js", "dist/**", { basename: true })` returns `false`, even though the same call without the option returns `true`.
