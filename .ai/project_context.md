@@ -95,6 +95,7 @@ Turborepo monorepo
 - `decisions/006-redis-for-refresh-tokens.md`
 - `decisions/007-chunk-level-fanout-review-pipeline.md`
 - `decisions/008-openrouter-multi-model-fallback.md`
+- `decisions/009-ollama-local-dev-llm-tier.md`
 
 ## Memory
 - `memory/lessons.md`

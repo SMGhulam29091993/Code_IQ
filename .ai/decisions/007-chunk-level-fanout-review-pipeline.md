@@ -78,3 +78,24 @@ Summary of what changes:
 
 **Applies to:** backend (`apps/api/src/jobs/`, `apps/api/src/modules/reviews/`,
 `packages/db/prisma/schema.prisma`)
+
+## Addendum (2026-10-04): `failParentOnFailure: false` never did what this ADR assumed
+
+The Negative consequence above warned that `FlowProducer` child-failure semantics "must be used
+correctly or a single stuck chunk could block finalization". They weren't. Every child was
+created with `failParentOnFailure: false`, on the assumption that it lets the parent finalize
+job run once all children settle. In BullMQ (verified against 5.80.8's `job-options.d.ts`)
+`false` is simply the default — a child that fails after all its attempts stays an *unresolved*
+dependency, and the parent sits in `waiting-children` forever. The option with the intended
+meaning is `ignoreDependencyOnFailure: true` ("moves the jobId from its parent dependencies to
+failed dependencies when it fails after all attempts").
+
+Consequence until now: **any** review with even one terminally-failed chunk never finalized —
+it stayed `RUNNING` with nothing posted. Observed on PR #10 (2026-09-12, 8 failed chunks), PR #8
+and PR #15 (2026-10-04, chunks failed by BullMQ for stalling when the dev API restarted). Unit
+tests mock `FlowProducer` entirely, so nothing caught it — same class of gap as pitfall #016.
+
+**Fix:** children now use `ignoreDependencyOnFailure: true` (coordinator + `retryReview`).
+Finalize counts every non-`DONE` chunk as a gap (a stalled chunk's row stays `RUNNING`, since
+BullMQ fails it without running the processor's catch block), and retry's `findIncomplete`
+includes `RUNNING` rows. See `memory/pitfalls.md` #021.

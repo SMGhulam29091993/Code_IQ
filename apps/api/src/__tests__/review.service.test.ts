@@ -344,7 +344,7 @@ describe("ReviewService", () => {
             opts: expect.objectContaining({
               jobId: "review-1-chunk-1-retry1",
               priority: 1,
-              failParentOnFailure: false,
+              ignoreDependencyOnFailure: true,
             }),
           }),
         ],

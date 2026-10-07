@@ -1,6 +1,29 @@
 # Current State
 > Update on every task that changes code. Never leave stale.
 
+## 2026-10-04 (Fix: reviews with any failed chunk never finalized — branch `feat/ollama-local-llm`)
+PR #15's review stuck `RUNNING`: chunk jobs stalled out on dev-server restarts, and the Flow
+parent never ran because `failParentOnFailure: false` doesn't do what decisions/007 assumed.
+Fixed on this branch (user's instruction: all fixes here, then push to re-trigger PR #15's
+review): `ignoreDependencyOnFailure: true` on chunk children, finalize counts non-DONE chunks as
+gaps, retry re-runs stalled `RUNNING` chunks. 408/408 tests. Pitfall #021, decisions/007 addendum.
+`feat/pr-review-status` (status comment + check run) is a separate branch and does NOT yet have
+this fix — it needs it before merging.
+
+## 2026-10-04 (Local Ollama LLM tier for development, on branch `feat/ollama-local-llm`)
+Per user request: the developer's local Ollama (`qwen2.5-coder:7b`) is now the first LLM tier in
+development, ahead of Gemini → OpenRouter, so local building/testing stops burning free-tier
+quota. New `lib/ollama.ts` adapter, opt-in via `OLLAMA_MODEL` (rejected in production at boot),
+`OLLAMA_BASE_URL` for Docker (`host.docker.internal`). Design + trade-offs: `decisions/009`.
+390/390 API tests, typecheck, lint clean; live-verified against the real local model. Not merged.
+First real pipeline run surfaced 3 bugs, fixed same day on the same branch (B→A→C, one commit
+each): inline comments only on lines inside the PR diff (`91de00c`, pitfall #019), serialized
+Ollama requests + `OLLAMA_TIMEOUT_MS` (`631f2bf`, decisions/009 addendum), plain-string
+failed-job logging (`509ad29`, pitfall #020). 406/406 tests. PR #10's review
+(`cmtyeetbv0000jtfthgcswo08`) is still stuck `RUNNING` after its finalize 422'd — needs a
+retry to post; PR #8's fresh run (`cmuth68bu0000yyftfho4wol0`) was mid-flight when these fixes
+landed.
+
 ## 2026-09-13 (Fast-fail + user-facing message on full LLM exhaustion, on branch `fix/llm-client-exhaustion-summary-log`)
 User-reported UX bug, third piece of work on this same branch/ADR thread (decisions/008): when
 every LLM fallback tier hits its free-tier limit mid-review, the review used to sit in `RUNNING`

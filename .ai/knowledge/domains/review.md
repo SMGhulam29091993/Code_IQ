@@ -235,7 +235,7 @@ processCoordinatorJob(job):
   priority = await fairnessService.priorityFor(installationId)
 
   // 7. Fan out: one review-chunk job per chunk under a review-finalize parent. BullMQ activates
-  // the parent automatically once every child has settled; failParentOnFailure: false means one
+  // the parent automatically once every child has settled; ignoreDependencyOnFailure: true means one
   // chunk exhausting its own retries doesn't block finalization.
   await flowProducer.add({
     name: 'finalize-review', queueName: 'review-finalize-queue',
@@ -243,7 +243,7 @@ processCoordinatorJob(job):
     children: chunkRows.map(row => ({
       name: 'review-chunk', queueName: 'review-chunk-queue',
       data: { reviewId: review.id, chunkId: row.id, installationId, filename: row.filename, patch: row.patch, repoConfig },
-      opts: { jobId: `${review.id}:${row.id}`, priority, attempts: 3, backoff: { type: 'exponential', delay: 2000 }, failParentOnFailure: false },
+      opts: { jobId: `${review.id}:${row.id}`, priority, attempts: 3, backoff: { type: 'exponential', delay: 2000 }, ignoreDependencyOnFailure: true },
     })),
   })
 
@@ -257,7 +257,7 @@ ON ANY UNHANDLED ERROR:
 One job per chunk — the actual LLM-call workload, and the one queue you scale horizontally by
 adding worker pods. Rate-limited fleet-wide via the queue's `Worker.limiter` (Redis-backed), not
 an in-process pool. `attempts: 3` on each job (set by whoever created the Flow) means a failed
-Gemini call gets BullMQ's own retry/backoff before this processor ever needs `failParentOnFailure`
+Gemini call gets BullMQ's own retry/backoff before this processor ever needs `ignoreDependencyOnFailure`
 to matter.
 
 ```
@@ -272,7 +272,7 @@ processChunkJob(job):
     reviewChunkRepo.markDone(chunkId)
   catch (err):
     reviewChunkRepo.markFailed(chunkId, String(err))
-    throw err   // lets BullMQ's attempts/backoff retry; failParentOnFailure:false means the
+    throw err   // lets BullMQ's attempts/backoff retry; ignoreDependencyOnFailure:true means the
                 // parent still proceeds once retries are exhausted
   finally:
     reviewRepo.incrementCompletedChunks(reviewId)  // UI progress only — may over-count across
@@ -293,7 +293,7 @@ processFinalizeJob(job):
   { reviewId, installationId, owner, repo, prNumber, prTitle, headSha, truncated } = job.data
 
   allChunks = reviewChunkRepo.findByReviewId(reviewId)
-  failedChunks = allChunks.filter(c => c.status === 'FAILED')
+  failedChunks = allChunks.filter(c => c.status !== 'DONE')   // stalled chunks stay RUNNING — still a gap (pitfall #021)
 
   if allChunks.length > 0 and failedChunks.length === allChunks.length:
     reviewRepo.update(reviewId, { status: 'FAILED' })   // no GitHub post — nothing succeeded
@@ -352,14 +352,16 @@ already loaded — a retry never re-runs the truncation decision, only the coord
 | GitHub rate limit hit (403) | BullMQ retry with exponential backoff (whichever job made the call) |
 | PR deleted before review finishes | GitHub API returns 404 — mark DONE, log warning |
 | Gemini returns malformed JSON | Zod parse fails → chunk job throws → chunk marked FAILED |
+| LLM reports an issue on a line outside the PR's diff hunks | Not posted inline (GitHub would 422 the whole review); listed under "Other findings" in the review body instead |
 | Gemini returns > 50 issues for one chunk | Truncate at 50 (Zod schema `.max(50)`) |
 | File is binary (no `patch`) | Filter out in `diffService.filterFiles` |
 | File is in ignore pattern | Filter out in `diffService.filterFiles` |
 | Coordinator job re-delivered (same deliveryId) | BullMQ `jobId` dedup on `review-coordinator-queue` — second enqueue is a no-op |
 | Concurrent coordinator jobs for same PR | Last one wins (headSha differs → separate Review row) |
 | Retry | Re-enters the Flow directly with only non-`DONE` `ReviewChunk` rows as children — no diff re-fetch, no re-billing already-successful chunks |
+| Chunk job stalls out (worker process restarted mid-job) | BullMQ fails it without running its catch block, so its row stays `RUNNING`. `ignoreDependencyOnFailure` still lets finalize run; finalize counts every non-`DONE` chunk as a gap; retry's `findIncomplete` includes `RUNNING` rows so they re-run (pitfall #021) |
 | Retry where every chunk fails again | Review marked `FAILED` again, same as a fresh run |
-| One review-chunk job's Gemini call fails all 3 attempts | `failParentOnFailure: false` lets the finalize job run anyway once every sibling has also settled |
+| One review-chunk job's Gemini call fails all 3 attempts | `ignoreDependencyOnFailure: true` lets the finalize job run anyway once every sibling has also settled |
 
 ### Unit test cases
 ```typescript
@@ -548,8 +550,15 @@ describe('GeminiService.reviewDiff', () => {
 ### postReview pseudocode:
 ```
 postReview(octokit, { owner, repo, prNumber, headSha, issues, summary }):
-  // Format inline comments
-  comments = issues.map(issue => ({
+  // Only lines inside the PR's diff hunks can take an inline comment — GitHub 422s the WHOLE
+  // review ("Line could not be resolved") if even one comment misses. LLM line numbers are not
+  // trusted: fetch the PR's files (pulls.listFiles, paged), parse each patch's hunks into the
+  // set of right-side added+context lines, and split issues into anchored / unanchored.
+  commentable = fetchCommentableLines(octokit, owner, repo, prNumber)
+  anchored, unanchored = partition(issues, i => commentable[i.file]?.has(i.line))
+
+  // Format inline comments (anchored only)
+  comments = anchored.map(issue => ({
     path: issue.file,
     line: issue.line,
     body: formatComment(issue),
@@ -561,7 +570,7 @@ postReview(octokit, { owner, repo, prNumber, headSha, issues, summary }):
     pull_number: prNumber,
     commit_id: headSha,
     event: 'COMMENT',  // non-blocking — does not REQUEST_CHANGES
-    body: formatSummary(summary, issues),
+    body: formatSummary(summary, issues) + formatUnanchored(unanchored),  // "Other findings" list, max 50
     comments,
   })
   return response.data.id
@@ -598,6 +607,10 @@ describe('CommentService.postReview', () => {
   it('formats summary with issue count breakdown by severity')
   it('returns the GitHub review ID')
   it('handles empty issues array (posts summary-only review)')
+  it('posts issues on lines outside the PR diff in the summary, not as inline comments')
+  it('falls back to the summary for every issue on a file GitHub sent no patch for')
+  it('fetches every page of PR files for the commentable-line check')
+  it('omits the Other findings section when every issue is anchored')
 })
 ```
 
@@ -672,6 +685,14 @@ describe('CommentService.postReview', () => {
   directly. Retry-with-backoff used to live inside `GeminiService` itself; it moved into this
   file's `RetryingLLMClient` so it applies uniformly regardless of provider, and so
   `GeminiService` could go back to just building prompts and parsing responses.
+- **Local Ollama tier in development (`decisions/009`, 2026-10-04):** when `OLLAMA_MODEL` is set
+  (never in production — `env.ts` refuses to boot), `buildLLMClient()` puts `lib/ollama.ts`'s
+  `OllamaClient` ahead of Gemini in the same fallback chain. Unreachable/timed-out/4xx Ollama is
+  non-retryable, so the chain falls straight through to Gemini. Requests are serialized per
+  process so the timeout (`OLLAMA_TIMEOUT_MS`, default 300s) measures inference, not queueing.
+  Output is capped by `OLLAMA_NUM_PREDICT` (default 2048 tokens); a capped-out answer throws and
+  falls through to Gemini rather than returning half-written JSON (decisions/009 2026-10-07).
+  `GeminiService` and the job processors are unchanged.
 - **Fast-fail on full LLM exhaustion (`decisions/008`'s 2026-09-13 addendum):**
   `FallbackLLMClient` throws a typed `lib/llm-client.ts` `AllTiersExhaustedError` once every tier
   fails, instead of rethrowing the last provider error. `jobs/review-chunk.job.ts` catches it,

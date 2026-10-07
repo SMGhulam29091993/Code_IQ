@@ -58,9 +58,29 @@ export function startReviewWorkers(
 
   for (const worker of [coordinatorWorker, chunkWorker, finalizeWorker]) {
     worker.on("failed", (job, err) => {
-      console.error(`${worker.name} job ${job?.id ?? "unknown"} failed:`, err);
+      console.error(`${worker.name} job ${job?.id ?? "unknown"} failed: ${formatJobError(err)}`);
     });
   }
 
   return [coordinatorWorker, chunkWorker, finalizeWorker];
+}
+
+/**
+ * Plain-string rendering of a failed job's error, for the worker "failed" log line.
+ *
+ * Passing the error object straight to console.error made Node's util.inspect walk every own
+ * property, and on 2026-10-04 that walk itself threw (`TypeError: Cannot read properties of
+ * undefined (reading 'value')` inside formatProperty) — so the log line meant to explain a
+ * failure crashed instead and hid the real error. The stack (plus its cause, if any) carries
+ * everything needed to diagnose it, and building a string never inspects arbitrary properties.
+ */
+export function formatJobError(err: unknown): string {
+  try {
+    if (!(err instanceof Error)) return String(err);
+    const main = err.stack ?? `${err.name}: ${err.message}`;
+    const cause = err.cause instanceof Error ? `\n  [cause] ${err.cause.stack ?? err.cause.message}` : "";
+    return main + cause;
+  } catch {
+    return "<error could not be formatted>";
+  }
 }

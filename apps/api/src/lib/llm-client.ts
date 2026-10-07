@@ -1,5 +1,6 @@
 import { env } from "./env";
 import { geminiModel } from "./gemini";
+import { OllamaClient } from "./ollama";
 import { OpenRouterClient } from "./openrouter";
 import type { ILLMClient } from "../modules/reviews/review.types";
 
@@ -166,18 +167,40 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Factory — composes the configured chain: Gemini first (free when its own quota isn't
-// exhausted, and its prompts/output are the most validated), then each model listed in
-// OPEN_ROUTER_MODELS, in order. Reorder/add/remove OpenRouter models via that env var alone —
-// no code change or redeploy of this file needed. See decisions/008 for why Gemini stays in the
-// chain rather than being replaced outright, and .env.example for the default model list
-// (verify against https://openrouter.ai/models — free-tier offerings rotate).
-export function buildLLMClient(): ILLMClient {
-  const openRouterModels = env.OPEN_ROUTER_MODELS.split(",")
+// Factory — composes the configured chain: a local Ollama model first when OLLAMA_MODEL is set
+// (local development only — env.ts rejects it in production; decisions/009), then Gemini (free
+// when its own quota isn't exhausted, and its prompts/output are the most validated), then each
+// model listed in OPEN_ROUTER_MODELS, in order. Reorder/add/remove OpenRouter models via that
+// env var alone — no code change or redeploy of this file needed. See decisions/008 for why
+// Gemini stays in the chain rather than being replaced outright, and .env.example for the
+// default model list (verify against https://openrouter.ai/models — free-tier offerings rotate).
+export function buildLLMClient(
+  config: Pick<typeof env, "OPEN_ROUTER_MODELS" | "OLLAMA_BASE_URL" | "OLLAMA_MODEL"> &
+    Partial<Pick<typeof env, "OLLAMA_TIMEOUT_MS" | "OLLAMA_NUM_PREDICT">> = env
+): ILLMClient {
+  const openRouterModels = config.OPEN_ROUTER_MODELS.split(",")
     .map((m) => m.trim())
     .filter(Boolean);
 
+  const ollamaTiers = config.OLLAMA_MODEL
+    ? [
+        {
+          client: new RetryingLLMClient(
+            new OllamaClient(
+              config.OLLAMA_BASE_URL,
+              config.OLLAMA_MODEL,
+              config.OLLAMA_TIMEOUT_MS,
+              config.OLLAMA_NUM_PREDICT
+            ),
+            `ollama:${config.OLLAMA_MODEL}`
+          ),
+          label: `ollama:${config.OLLAMA_MODEL}`,
+        },
+      ]
+    : [];
+
   const tiers: Array<{ client: ILLMClient; label: string }> = [
+    ...ollamaTiers,
     { client: new RetryingLLMClient(geminiModel, "gemini-2.5-flash"), label: "gemini-2.5-flash" },
     ...openRouterModels.map((model) => ({
       client: new RetryingLLMClient(new OpenRouterClient(model), `openrouter:${model}`),

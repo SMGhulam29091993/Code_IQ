@@ -12,9 +12,9 @@ import type {
 } from "../modules/reviews/review.types";
 
 // decisions/007 Phase 3: the Flow parent — BullMQ activates this automatically once every
-// review-chunk child of the same Flow has settled (whether it reached DONE or exhausted its
-// retries and stayed FAILED; failParentOnFailure: false on the children is what lets this run
-// instead of the whole Flow failing on one bad chunk). Aggregates whatever issues exist for the
+// review-chunk child of the same Flow has settled (whether it reached DONE, or exhausted its
+// retries / stalled out; ignoreDependencyOnFailure: true on the children is what lets this run
+// at all once any child failed — memory/pitfalls.md #021). Aggregates whatever issues exist for the
 // review (from this run's chunks, and — on a retry — chunks that already reached DONE in an
 // earlier attempt), posts the single GitHub review, and marks the review DONE/FAILED.
 //
@@ -35,8 +35,12 @@ export class ReviewFinalizeJobProcessor {
       job.data;
 
     const allChunks = await this.reviewChunkRepo.findByReviewId(reviewId);
-    const failedChunks = allChunks.filter((chunk) => chunk.status === "FAILED");
     const doneChunks = allChunks.filter((chunk) => chunk.status === "DONE");
+    // Every chunk that didn't reach DONE is a gap — not only FAILED ones. A chunk job that BullMQ
+    // fails for stalling (e.g. the worker process restarted mid-job) never runs its own catch
+    // block, so its row is left at RUNNING; by the time finalize runs, every child has settled,
+    // so a non-DONE row can only be a chunk that's never going to finish (pitfall #021).
+    const failedChunks = allChunks.filter((chunk) => chunk.status !== "DONE");
 
     // ALL chunks failing is a pipeline failure. A partial failure isn't — the DONE ones' issues
     // still get summarized and posted, with a note about the gap.

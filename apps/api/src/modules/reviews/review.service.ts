@@ -118,7 +118,12 @@ export class ReviewService implements IReviewService {
             priority,
             attempts: 3,
             backoff: { type: "exponential", delay: 2000 },
-            failParentOnFailure: false,
+            // NOT failParentOnFailure: false — that's just BullMQ's default, and under it a failed
+            // child stays an unresolved dependency, leaving the finalize parent in
+            // waiting-children forever (found live 2026-10-04, memory/pitfalls.md #021).
+            // ignoreDependencyOnFailure moves a child that fails after all its attempts (or
+            // stalls out) to the parent's failed dependencies, so finalize still runs.
+            ignoreDependencyOnFailure: true,
           },
         })),
       });

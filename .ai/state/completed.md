@@ -1,6 +1,66 @@
 # Completed
 > Append-only. Newest at top.
 
+## 2026-10-07 (Ollama output cap — branch `feat/ollama-local-llm`, merged into `feat/pr-review-status`)
+- Investigated the 2026-10-04 `timed out after 300000ms`: re-ran PR #15's real summary (55
+  issues → 2.7s, 40 tokens) and the largest real chunk (152 lines → 62.7s, 662 tokens) against
+  `qwen2.5-coder:7b`; ~16 tok/s generation. Not reproducible in isolation; root cause of that one
+  request unconfirmed (no server logs) — the fix bounds it either way.
+- `OllamaClient` now sends `num_predict` (default 2048, `OLLAMA_NUM_PREDICT`) and treats
+  `done_reason: "length"` as a non-retryable `LLMClientError` so a cut-off answer falls through to
+  Gemini instead of failing JSON parsing outside the fallback chain. Live-verified (cap 10 → error,
+  2048 → ok). 2 new tests. decisions/009 addendum.
+
+## 2026-10-04 (Fix: Flow parent blocked forever by any failed chunk — branch `feat/ollama-local-llm`)
+- Root cause of PR #15 (and earlier PR #10/#8) stuck `RUNNING`: chunk children used
+  `failParentOnFailure: false` (BullMQ's default — a failed child blocks the parent forever)
+  instead of `ignoreDependencyOnFailure: true`. Verified against bullmq 5.80.8's
+  `job-options.d.ts`. Triggered by chunk jobs stalling when `turbo run dev` restarted the API.
+- Fixed in `review-coordinator.job.ts` + `review.service.ts` (`retryReview`); `review-finalize.job.ts`
+  counts any non-DONE chunk as a gap (stalled rows stay `RUNNING`); `ReviewChunkRepository.
+  findIncomplete` includes `RUNNING`. 2 new finalize tests; 408/408, typecheck, lint clean.
+- Docs: decisions/007 addendum, pitfall #021, `review.md`, `review-pipeline-scaling.md`.
+
+## 2026-10-04 (Fixes from the first real Ollama pipeline run — branch `feat/ollama-local-llm`)
+Re-ran the two real stuck reviews (PR #10 resumable retry of its 8 failed chunks; PR #8 as a
+fresh coordinator job, since a 0-chunk retry would post a false "no issues" review). The 4
+`seed_*` PENDING/RUNNING reviews were skipped — fake installations/repos/SHAs, no diff exists.
+Three bugs surfaced, fixed in the user's chosen order B→A→C:
+- **B** `91de00c` — `CommentService.postReview` posted LLM line numbers verbatim; one line
+  outside the diff 422'd the whole review ("Line could not be resolved"). Now parses the PR's
+  patches (`parseCommentableLines`, manual `pulls.listFiles` paging — `octokit.paginate` doesn't
+  typecheck under the pinned Octokit v19) and lists unanchored issues under "Other findings".
+  Pitfall #019.
+- **A** `631f2bf` — concurrent chunk jobs queued inside Ollama and hit the 120s timeout before
+  inference began (worse with two API processes running). `OllamaClient` now serializes
+  requests; timeout starts on send, default 300s via `OLLAMA_TIMEOUT_MS`; timeout vs
+  unreachable reported distinctly. decisions/009 addendum.
+- **C** `509ad29` — the worker "failed" handler's `console.error(msg, err)` threw inside
+  `util.inspect`, hiding the real error. Now logs `formatJobError(err)` (stack + cause string,
+  never throws). Pitfall #020.
+- 406/406 API tests, typecheck, lint clean.
+
+## 2026-10-04 (Local Ollama LLM tier for development — branch `feat/ollama-local-llm`)
+- New `apps/api/src/lib/ollama.ts` (`OllamaClient`, Adapter behind `ILLMClient`): native
+  `/api/chat`, `stream: false`, `format: "json"`, per-request `num_ctx: 16384`, 120s timeout.
+  Unreachable/timeout/4xx → non-retryable `LLMClientError` (falls through to Gemini at once);
+  5xx retryable.
+- `lib/llm-client.ts`'s `buildLLMClient()` prepends an `ollama:<model>` tier when `OLLAMA_MODEL`
+  is set; now takes an optional config param (defaults to `env`) so tier order is unit-testable.
+- `lib/env.ts`: `OLLAMA_BASE_URL` (default `http://localhost:11434`), optional `OLLAMA_MODEL`,
+  plus a refine that refuses to boot with `OLLAMA_MODEL` set in production.
+  `.env.example` documents both; `docker-compose.yml` points the `api` container at
+  `host.docker.internal:11434`. Local `apps/api/.env` (gitignored) set to `qwen2.5-coder:7b`.
+- Tests: new `ollama-client.test.ts` (6), 3 new `buildLLMClient` cases in `llm-client.test.ts`.
+  390/390 API tests pass; typecheck and lint clean. (Typecheck first failed on a stale generated
+  Prisma client — pitfall #017 — fixed by `prisma generate`, unrelated to this change. The test
+  run's one "unhandled error" is a Redis ECONNREFUSED with Docker not running; reproduced
+  identically with this change stashed — pre-existing, environmental.)
+- Live: real `GeminiService.reviewDiff` prompt through `buildLLMClient()` → `qwen2.5-coder:7b`
+  returned schema-valid JSON in ~13s (cold load included), no fallback triggered.
+- New ADR `decisions/009`; `knowledge/domains/review.md`, `knowledge/technical/backend/
+  architecture.md`, `project_context.md` updated.
+
 ## 2026-09-13 (Fast-fail + user-facing message on full LLM exhaustion — same branch `fix/llm-client-exhaustion-summary-log`)
 User-reported: when every LLM fallback tier (decisions/008 — Gemini + 5 OpenRouter free models)
 hits its free-tier quota mid-review, the review just sat in `RUNNING` for a long time with no

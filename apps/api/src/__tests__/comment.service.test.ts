@@ -1,11 +1,25 @@
 import type { Octokit } from "@octokit/rest";
 import { describe, expect, it, vi } from "vitest";
-import { CommentService } from "../modules/reviews/comment.service";
+import { CommentService, parseCommentableLines } from "../modules/reviews/comment.service";
 import type { GeminiIssue } from "../modules/reviews/review.types";
 
-function buildOctokit(reviewId = 999) {
+// A hunk whose right side covers new-file lines `start`..`start + count - 1`, all added lines.
+function addedHunk(start: number, count: number): string {
+  const body = Array.from({ length: count }, (_, i) => `+line ${start + i}`).join("\n");
+  return `@@ -0,0 +${start},${count} @@\n${body}`;
+}
+
+// Default PR diff covers every line the tests below anchor issues on (src/index.ts 1–50,
+// src/foo.ts 1–10), so the pre-existing inline-comment tests behave as before.
+const DEFAULT_PR_FILES = [
+  { filename: "src/index.ts", patch: addedHunk(1, 50) },
+  { filename: "src/foo.ts", patch: addedHunk(1, 10) },
+];
+
+function buildOctokit(reviewId = 999, prFiles: Array<{ filename: string; patch?: string }> = DEFAULT_PR_FILES) {
   return {
     pulls: {
+      listFiles: vi.fn().mockResolvedValue({ data: prFiles }),
       createReview: vi.fn().mockResolvedValue({ data: { id: reviewId } }),
     },
   } as unknown as Octokit;
@@ -151,5 +165,107 @@ describe("CommentService.postReview", () => {
     const call = vi.mocked(octokit.pulls.createReview).mock.calls[0]![0]!;
     expect(call.comments).toEqual([]);
     expect(call.body).toContain("All clear.");
+  });
+
+  // decisions/009 follow-up: GitHub 422s the whole review if one inline comment targets a line
+  // outside the diff — those issues move to the summary body instead.
+  it("posts issues on lines outside the PR diff in the summary, not as inline comments", async () => {
+    const octokit = buildOctokit(999, [{ filename: "src/index.ts", patch: addedHunk(40, 5) }]);
+    await service.postReview(octokit, {
+      owner: "acme",
+      repo: "widgets",
+      prNumber: 5,
+      headSha: "abc123",
+      issues: [
+        buildIssue({ line: 42, message: "Inside the hunk" }),
+        buildIssue({ line: 400, message: "Outside the hunk" }),
+        buildIssue({ file: "src/not-in-pr.ts", line: 3, message: "File not in PR" }),
+      ],
+      summary: "x",
+    });
+
+    const call = vi.mocked(octokit.pulls.createReview).mock.calls[0]![0]!;
+    expect(call.comments).toEqual([expect.objectContaining({ path: "src/index.ts", line: 42 })]);
+    expect(call.body).toContain("### Other findings");
+    expect(call.body).toContain("`src/index.ts:400` — Outside the hunk");
+    expect(call.body).toContain("`src/not-in-pr.ts:3` — File not in PR");
+    expect(call.body).not.toContain("Inside the hunk");
+    // Severity counts still cover every issue, anchored or not.
+    expect(call.body).toContain("| 🔴 Critical | 3 |");
+  });
+
+  it("falls back to the summary for every issue on a file GitHub sent no patch for", async () => {
+    const octokit = buildOctokit(999, [{ filename: "assets/logo.png" }]);
+    await service.postReview(octokit, {
+      owner: "acme",
+      repo: "widgets",
+      prNumber: 5,
+      headSha: "abc123",
+      issues: [buildIssue({ file: "assets/logo.png", line: 1 })],
+      summary: "x",
+    });
+
+    const call = vi.mocked(octokit.pulls.createReview).mock.calls[0]![0]!;
+    expect(call.comments).toEqual([]);
+    expect(call.body).toContain("`assets/logo.png:1`");
+  });
+
+  it("fetches every page of PR files for the commentable-line check", async () => {
+    const octokit = buildOctokit();
+    const fullPage = Array.from({ length: 100 }, (_, i) => ({ filename: `f${i}.ts`, patch: addedHunk(1, 1) }));
+    vi.mocked(octokit.pulls.listFiles)
+      .mockResolvedValueOnce({ data: fullPage } as never)
+      .mockResolvedValueOnce({ data: [{ filename: "src/late.ts", patch: addedHunk(5, 1) }] } as never);
+    await service.postReview(octokit, {
+      owner: "acme",
+      repo: "widgets",
+      prNumber: 5,
+      headSha: "abc123",
+      issues: [buildIssue({ file: "src/late.ts", line: 5 })],
+      summary: "x",
+    });
+
+    expect(octokit.pulls.listFiles).toHaveBeenCalledTimes(2);
+    expect(octokit.pulls.listFiles).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pull_number: 5, per_page: 100, page: 2 })
+    );
+    const call = vi.mocked(octokit.pulls.createReview).mock.calls[0]![0]!;
+    expect(call.comments).toEqual([expect.objectContaining({ path: "src/late.ts", line: 5 })]);
+  });
+
+  it("omits the Other findings section when every issue is anchored", async () => {
+    const octokit = buildOctokit();
+    await service.postReview(octokit, {
+      owner: "acme",
+      repo: "widgets",
+      prNumber: 5,
+      headSha: "abc123",
+      issues: [buildIssue()],
+      summary: "x",
+    });
+
+    const call = vi.mocked(octokit.pulls.createReview).mock.calls[0]![0]!;
+    expect(call.body).not.toContain("Other findings");
+  });
+});
+
+describe("parseCommentableLines", () => {
+  it("collects added and context lines from the hunk header's new-file start", () => {
+    const patch = ["@@ -10,4 +20,5 @@", " context", "-removed", "+added", " context", "+added"].join("\n");
+    expect([...parseCommentableLines(patch)]).toEqual([20, 21, 22, 23]);
+  });
+
+  it("handles multiple hunks", () => {
+    const patch = ["@@ -1,1 +1,1 @@", "+a", "@@ -50 +60,2 @@", " b", "+c"].join("\n");
+    expect([...parseCommentableLines(patch)]).toEqual([1, 60, 61]);
+  });
+
+  it('ignores "\\ No newline at end of file" markers', () => {
+    const patch = ["@@ -1,1 +1,1 @@", "+a", "\\ No newline at end of file"].join("\n");
+    expect([...parseCommentableLines(patch)]).toEqual([1]);
+  });
+
+  it("returns an empty set for an empty patch", () => {
+    expect(parseCommentableLines("").size).toBe(0);
   });
 });

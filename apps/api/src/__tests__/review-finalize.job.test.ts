@@ -202,4 +202,36 @@ describe("ReviewFinalizeJobProcessor.process", () => {
       })
     );
   });
+
+  // pitfall #021: a chunk job BullMQ fails for stalling never reaches its catch block, so its row
+  // is still RUNNING when finalize runs — it's a gap, not a success.
+  it("counts a chunk stranded at RUNNING as a gap in the summary", async () => {
+    vi.mocked(reviewChunkRepo.findByReviewId).mockResolvedValue([
+      buildChunk({ status: "DONE" }),
+      buildChunk({ id: "chunk-2", status: "RUNNING" }),
+    ]);
+
+    await processor.process(buildJob());
+
+    expect(commentService.postReview).toHaveBeenCalled();
+    expect(reviewRepo.update).toHaveBeenCalledWith(
+      "review-1",
+      expect.objectContaining({
+        status: "DONE",
+        summary: expect.stringContaining("1 file section(s) could not be analyzed"),
+      })
+    );
+  });
+
+  it("marks the review FAILED when every chunk is stranded at RUNNING", async () => {
+    vi.mocked(reviewChunkRepo.findByReviewId).mockResolvedValue([
+      buildChunk({ status: "RUNNING" }),
+      buildChunk({ id: "chunk-2", status: "RUNNING" }),
+    ]);
+
+    await processor.process(buildJob());
+
+    expect(commentService.postReview).not.toHaveBeenCalled();
+    expect(reviewRepo.update).toHaveBeenCalledWith("review-1", expect.objectContaining({ status: "FAILED" }));
+  });
 });
