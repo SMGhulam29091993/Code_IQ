@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Installation } from "@codeiq/db";
 import { ALL_TIERS_EXHAUSTED_CHUNK_ERROR } from "../jobs/review-chunk.job";
 import { ReviewFinalizeJobProcessor } from "../jobs/review-finalize.job";
+import { AllTiersExhaustedError } from "../lib/llm-client";
 import type { IInstallationRepository } from "../modules/github/github.types";
 import type {
   ICommentService,
@@ -325,6 +326,40 @@ describe("ReviewFinalizeJobProcessor.process", () => {
       expect(update).toEqual(expect.objectContaining({ status: "DONE" }));
       expect(update).not.toHaveProperty("githubReviewId");
       expect(prStatus.complete).toHaveBeenCalledWith("review-1", expect.objectContaining({ githubReviewId: null }));
+    });
+  });
+
+  // 2026-10-08: a failed finalize (e.g. GitHub 500 on createReview) left the review RUNNING forever.
+  describe("failure handling across attempts", () => {
+    function jobOnAttempt(attemptsMade: number, attempts = 3) {
+      return { ...buildJob(), attemptsMade, opts: { attempts } } as unknown as ReturnType<typeof buildJob>;
+    }
+
+    it("rethrows without settling the review on a non-final attempt, so BullMQ retries", async () => {
+      vi.mocked(commentService.postReview).mockRejectedValue(new Error("Server Error"));
+
+      await expect(processor.process(jobOnAttempt(0))).rejects.toThrow("Server Error");
+
+      expect(reviewRepo.update).not.toHaveBeenCalledWith("review-1", expect.objectContaining({ status: "FAILED" }));
+      expect(prStatus.fail).not.toHaveBeenCalled();
+    });
+
+    it("marks the review FAILED and the PR status failed on the final attempt", async () => {
+      vi.mocked(commentService.postReview).mockRejectedValue(new Error("Server Error"));
+
+      await expect(processor.process(jobOnAttempt(2))).rejects.toThrow("Server Error");
+
+      expect(reviewRepo.update).toHaveBeenCalledWith("review-1", { status: "FAILED", failureReason: null });
+      expect(prStatus.fail).toHaveBeenCalledWith("review-1", null);
+    });
+
+    it("uses FREE_TIER_EXHAUSTED when the summary call ran out of every LLM tier", async () => {
+      vi.mocked(geminiService.summarizePR).mockRejectedValue(new AllTiersExhaustedError("quota", ["gemini=429"]));
+
+      await expect(processor.process(jobOnAttempt(2))).rejects.toThrow();
+
+      expect(reviewRepo.update).toHaveBeenCalledWith("review-1", { status: "FAILED", failureReason: "FREE_TIER_EXHAUSTED" });
+      expect(prStatus.fail).toHaveBeenCalledWith("review-1", "FREE_TIER_EXHAUSTED");
     });
   });
 });

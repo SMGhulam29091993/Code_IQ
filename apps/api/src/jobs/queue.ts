@@ -33,3 +33,13 @@ export const reviewCoordinatorQueue = new Queue("review-coordinator-queue", {
 // fan-in". Used by jobs/review-coordinator.job.ts (fresh reviews) and
 // modules/reviews/review.service.ts's retryReview (resumed reviews).
 export const reviewFlowProducer = new FlowProducer({ connection });
+
+// Options for every finalize-review Flow parent (coordinator + ReviewService.retryReview).
+// BullMQ's default is a single attempt, so one transient GitHub 5xx while posting the review was
+// fatal — found 2026-10-07: both PR #15 and #16's finalize jobs died on `HttpError: Server
+// Error` with every chunk already DONE. Retrying re-runs the summary call and the post; the
+// final attempt's failure marks the review FAILED (review-finalize.job.ts) so it can be retried.
+export const FINALIZE_JOB_OPTS = {
+  attempts: 3,
+  backoff: { type: "exponential" as const, delay: 10_000 },
+};

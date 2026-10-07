@@ -1,5 +1,5 @@
 import type { FlowProducer, Job } from "bullmq";
-import { REVIEW_CHUNK_QUEUE_NAME, REVIEW_FINALIZE_QUEUE_NAME } from "./queue";
+import { FINALIZE_JOB_OPTS, REVIEW_CHUNK_QUEUE_NAME, REVIEW_FINALIZE_QUEUE_NAME } from "./queue";
 import type { IInstallationRepository } from "../modules/github/github.types";
 import type { ConfigService } from "../modules/repos/config.service";
 import { listAllPullRequestFiles } from "../modules/reviews/pr-files";
@@ -150,6 +150,7 @@ export class ReviewCoordinatorJobProcessor {
       await this.flowProducer.add({
         name: "finalize-review",
         queueName: REVIEW_FINALIZE_QUEUE_NAME,
+        opts: FINALIZE_JOB_OPTS,
         data: {
           reviewId: review.id,
           installationId,

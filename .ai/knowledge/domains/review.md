@@ -395,6 +395,7 @@ already loaded — a retry never re-runs the truncation decision, only the coord
 | Concurrent coordinator jobs for same PR | Last one wins (headSha differs → separate Review row) |
 | Retry | Re-enters the Flow directly with only non-`DONE` `ReviewChunk` rows as children — no diff re-fetch, no re-billing already-successful chunks |
 | Chunk job stalls out (worker process restarted mid-job) | BullMQ fails it without running its catch block, so its row stays `RUNNING`. `ignoreDependencyOnFailure` still lets finalize run; finalize counts every non-`DONE` chunk as a gap; retry's `findIncomplete` includes `RUNNING` rows so they re-run (pitfall #021) |
+| Finalize throws (e.g. GitHub 5xx on `createReview`, summary LLM exhausted) | 3 attempts with exponential backoff from 10s (`FINALIZE_JOB_OPTS`, `jobs/queue.ts`); the final attempt marks the review `FAILED` (`FREE_TIER_EXHAUSTED` when the summary ran out of every LLM tier) and the PR status failed, so it can be retried. Before 2026-10-08: one attempt, review left `RUNNING` forever (pitfall #022) |
 | Retry where every chunk fails again | Review marked `FAILED` again, same as a fresh run |
 | One review-chunk job's Gemini call fails all 3 attempts | `ignoreDependencyOnFailure: true` lets the finalize job run anyway once every sibling has also settled |
 

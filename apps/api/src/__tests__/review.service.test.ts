@@ -26,6 +26,7 @@ vi.mock("../jobs/queue", () => ({
   reviewFlowProducer: { add: vi.fn() },
   REVIEW_CHUNK_QUEUE_NAME: "review-chunk-queue",
   REVIEW_FINALIZE_QUEUE_NAME: "review-finalize-queue",
+  FINALIZE_JOB_OPTS: { attempts: 3, backoff: { type: "exponential", delay: 10_000 } },
 }));
 vi.mock("../lib/octokit", () => ({
   getInstallationOctokit: vi.fn().mockReturnValue({ rest: {} }),
@@ -360,6 +361,7 @@ describe("ReviewService", () => {
       expect(reviewFlowProducer.add).toHaveBeenCalledWith({
         name: "finalize-review",
         queueName: "review-finalize-queue",
+        opts: { attempts: 3, backoff: { type: "exponential", delay: 10_000 } },
         data: expect.objectContaining({
           reviewId: "review-1",
           installationId: "install-1",

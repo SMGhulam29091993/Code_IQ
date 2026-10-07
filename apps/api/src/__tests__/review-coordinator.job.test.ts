@@ -269,6 +269,13 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
     expect(flowProducer.add).not.toHaveBeenCalled();
   });
 
+  it("gives the finalize parent retries, so a transient GitHub error isn't fatal", async () => {
+    await processor.process(buildJob());
+
+    const flow = vi.mocked(flowProducer.add).mock.calls[0]![0];
+    expect(flow.opts).toEqual({ attempts: 3, backoff: { type: "exponential", delay: 10_000 } });
+  });
+
   it("carries the repo's postSummaryComment setting on the finalize job", async () => {
     await processor.process(buildJob());
 
@@ -315,6 +322,7 @@ describe("ReviewCoordinatorJobProcessor.process", () => {
     expect(flowProducer.add).toHaveBeenCalledWith({
       name: "finalize-review",
       queueName: "review-finalize-queue",
+      opts: { attempts: 3, backoff: { type: "exponential", delay: 10_000 } },
       data: {
         reviewId: "review-1",
         installationId: "install-1",
